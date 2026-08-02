@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
-  getProfile, getWallet, getCryptoAssets, getDepositAddress
+  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -26,18 +26,28 @@ const BILLS = [
   { label: 'Betting', icon: Trophy },
 ];
 
-const TRANSACTIONS = [
-  { id: 1, title: 'Crypto Received', sub: 'USDT · TRC20', amount: 50000, time: '9:25 AM', icon: ArrowDownToLine },
-  { id: 2, title: 'Airtime Purchase', sub: 'MTN', amount: -2000, time: 'Yesterday', icon: Smartphone },
-  { id: 3, title: 'Withdrawal', sub: 'GTBank •••• 1234', amount: -20000, time: 'May 20, 2024', icon: ArrowUpFromLine },
-];
-
-const TRANSACTIONS_FULL = [
-  ...TRANSACTIONS,
-  { id: 4, title: 'Payment link — Studio', sub: 'TranxactPay', amount: 45000, time: '2 days ago', icon: Link2 },
-  { id: 5, title: 'Data Purchase', sub: 'Airtel · 2GB', amount: -1500, time: '3 days ago', icon: Wifi },
-  { id: 6, title: 'Electricity Bill', sub: 'Ikeja Electric', amount: -8750, time: '4 days ago', icon: Zap },
-];
+// Maps a real transactions-table row to what TransactionRow expects to render
+function mapTransaction(row) {
+  const byType = {
+    crypto_deposit: { title: `${row.crypto_asset || 'Crypto'} received`, icon: ArrowDownToLine },
+    send_user: { title: `Sent to ${row.counterparty || 'user'}`, icon: ArrowUpFromLine },
+    send_bank: { title: 'Bank transfer', icon: ArrowUpFromLine },
+    bill_payment: { title: row.description || 'Bill payment', icon: Smartphone },
+    fund_bank: { title: 'Wallet funded', icon: ArrowDownToLine },
+    referral: { title: 'Referral earning', icon: Users },
+    tranxactpay: { title: row.description || 'Payment link', icon: Link2 },
+  };
+  const meta = byType[row.type] || { title: row.type, icon: Wallet };
+  const pending = row.status === 'pending';
+  return {
+    id: row.id,
+    title: meta.title,
+    sub: pending ? 'Pending settlement' : (row.counterparty || row.description || ''),
+    amount: row.amount_ngn != null ? Number(row.amount_ngn) : 0,
+    time: new Date(row.created_at).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }),
+    icon: meta.icon,
+  };
+}
 
 const NAV = [
   { key: 'home', label: 'Home', icon: Home },
@@ -122,17 +132,6 @@ function BackHeader({ title, onBack, right = null }) {
       {right ? right : <div className="w-9 h-9" />}
     </div>
   );
-}
-
-function Countdown({ seconds }) {
-  const [remaining, setRemaining] = useState(seconds);
-  useEffect(() => {
-    const t = setInterval(() => setRemaining(r => (r > 0 ? r - 1 : 0)), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const m = Math.floor(remaining / 60).toString().padStart(2, '0');
-  const s = (remaining % 60).toString().padStart(2, '0');
-  return <span className={`font-mono ${remaining < 60 ? 'text-red-400' : 'text-white'}`}>{m}:{s}</span>;
 }
 
 function TabToggle({ options, value, onChange }) {
@@ -439,7 +438,7 @@ function TransactionRow({ tx }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onTranxactPay, onSeeAll, displayName = '', balance = 0 }) {
+function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onTranxactPay, onSeeAll, displayName = '', balance = 0, transactions = [] }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -474,24 +473,39 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
       <div>
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-sm font-semibold">Recent Transactions</h2>
-          <button onClick={onSeeAll} className="text-xs text-neutral-500 hover:text-white transition">See all</button>
+          {transactions.length > 0 && (
+            <button onClick={onSeeAll} className="text-xs text-neutral-500 hover:text-white transition">See all</button>
+          )}
         </div>
-        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
-          {TRANSACTIONS.map(tx => <TransactionRow key={tx.id} tx={tx} />)}
-        </div>
+        {transactions.length === 0 ? (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl py-8 text-center">
+            <p className="text-sm text-neutral-500">No transactions yet</p>
+            <p className="text-xs text-neutral-600 mt-1">Fund your wallet or receive crypto to get started</p>
+          </div>
+        ) : (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
+            {transactions.slice(0, 3).map(tx => <TransactionRow key={tx.id} tx={tx} />)}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // ---------- History ----------
-function HistoryScreen({ onBack }) {
+function HistoryScreen({ onBack, transactions = [] }) {
   return (
     <div>
       <BackHeader title="Transaction History" onBack={onBack} />
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
-        {TRANSACTIONS_FULL.map(tx => <TransactionRow key={tx.id} tx={tx} />)}
-      </div>
+      {transactions.length === 0 ? (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl py-10 text-center">
+          <p className="text-sm text-neutral-500">No transactions yet</p>
+        </div>
+      ) : (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
+          {transactions.map(tx => <TransactionRow key={tx.id} tx={tx} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -615,10 +629,20 @@ function ReceiveScreen({ onBack }) {
 }
 
 // ---------- Fund Wallet ----------
-function FundWalletScreen({ onBack }) {
+function FundWalletScreen({ onBack, username = '' }) {
   const [mode, setMode] = useState('bank');
-  const [copied, setCopied] = useState(false);
-  const accountNumber = '9038221045';
+  const [copiedField, setCopiedField] = useState(null);
+
+  const ACCOUNT_NUMBER = '6436425418';
+  const BANK_NAME = 'Moniepoint';
+  const ACCOUNT_NAME = 'Tranxact Technologies Ltd';
+  const reference = `TRX-${(username || 'USER').toUpperCase()}`;
+
+  const copy = (field, value) => {
+    navigator.clipboard?.writeText(value);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 1500);
+  };
 
   return (
     <div>
@@ -634,36 +658,41 @@ function FundWalletScreen({ onBack }) {
 
       {mode === 'bank' && (
         <div className="space-y-4">
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-5">
-              <span className="text-xs text-neutral-500">Expires in</span>
-              <Countdown seconds={1800} />
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4">
+            <div>
+              <div className="text-xs text-neutral-500 mb-1">Bank Name</div>
+              <div className="text-sm font-medium">{BANK_NAME}</div>
             </div>
-            <div className="space-y-4">
-              <div>
-                <div className="text-xs text-neutral-500 mb-1">Bank Name</div>
-                <div className="text-sm font-medium">Wema Bank</div>
+            <div>
+              <div className="text-xs text-neutral-500 mb-1">Account Number</div>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-lg font-semibold tracking-wide">{ACCOUNT_NUMBER}</span>
+                <button onClick={() => copy('account', ACCOUNT_NUMBER)} className="text-neutral-500 hover:text-white transition">
+                  {copiedField === 'account' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                </button>
               </div>
-              <div>
-                <div className="text-xs text-neutral-500 mb-1">Account Number</div>
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-lg font-semibold tracking-wide">{accountNumber}</span>
-                  <button
-                    onClick={() => { navigator.clipboard?.writeText(accountNumber); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-                    className="text-neutral-500 hover:text-white transition"
-                  >
-                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-neutral-500 mb-1">Account Name</div>
-                <div className="text-sm font-medium">TRANXACT/DAVID ADEYEMI</div>
-              </div>
+            </div>
+            <div>
+              <div className="text-xs text-neutral-500 mb-1">Account Name</div>
+              <div className="text-sm font-medium">{ACCOUNT_NAME}</div>
             </div>
           </div>
+
+          <div className="bg-violet-500/10 border border-violet-500/30 rounded-2xl p-5">
+            <div className="text-xs text-violet-300 mb-1">Your reference — required</div>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-lg font-semibold tracking-wide text-violet-200">{reference}</span>
+              <button onClick={() => copy('ref', reference)} className="text-violet-300 hover:text-white transition">
+                {copiedField === 'ref' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-violet-300/70 mt-2">
+              Paste this exactly into the transfer's narration/remark field. Without it, we can't match your payment to your wallet.
+            </p>
+          </div>
+
           <p className="text-xs text-neutral-600 text-center">
-            Transfer any amount from your bank app to this account. It's credited to your wallet once confirmed, usually within a few minutes.
+            Transfer any amount to this account with your reference included. It's credited to your wallet once confirmed.
           </p>
         </div>
       )}
@@ -932,7 +961,7 @@ function CryptoScreen() {
 }
 
 // ---------- Cards ----------
-function CardsScreen() {
+function CardsScreen({ fullName = '' }) {
   return (
     <div className="pt-4">
       <h1 className="text-xl font-bold mb-6">Cards</h1>
@@ -946,7 +975,7 @@ function CardsScreen() {
           <div className="relative z-10">
             <div className="font-mono text-lg tracking-widest mb-3">•••• •••• •••• 4821</div>
             <div className="flex items-center justify-between text-xs text-neutral-400">
-              <span>DAVID ADEYEMI</span>
+              <span>{fullName ? fullName.toUpperCase() : 'YOUR NAME'}</span>
               <span className="font-mono">12/28</span>
             </div>
           </div>
@@ -1137,11 +1166,17 @@ export default function TranxactApp() {
   const [tpOpen, setTpOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [wallet, setWallet] = useState(null);
+  const [transactions, setTransactions] = useState([]);
 
   const loadUserData = async (userId) => {
-    const [{ data: p }, { data: w }] = await Promise.all([getProfile(userId), getWallet(userId)]);
+    const [{ data: p }, { data: w }, { data: t }] = await Promise.all([
+      getProfile(userId),
+      getWallet(userId),
+      getRecentTransactions(userId),
+    ]);
     setProfile(p);
     setWallet(w);
+    setTransactions((t || []).map(mapTransaction));
   };
 
   useEffect(() => {
@@ -1200,16 +1235,17 @@ export default function TranxactApp() {
           onSeeAll={() => setHomeView('history')}
           displayName={displayName}
           balance={balance}
+          transactions={transactions}
         />
       )}
-      {tab === 'home' && homeView === 'fund' && <FundWalletScreen onBack={() => setHomeView('main')} />}
+      {tab === 'home' && homeView === 'fund' && <FundWalletScreen onBack={() => setHomeView('main')} username={profile?.username || ''} />}
       {tab === 'home' && homeView === 'receive' && <ReceiveScreen onBack={() => setHomeView('main')} />}
       {tab === 'home' && homeView === 'send' && <SendScreen onBack={() => setHomeView('main')} onDone={() => setHomeView('main')} />}
-      {tab === 'home' && homeView === 'history' && <HistoryScreen onBack={() => setHomeView('main')} />}
+      {tab === 'home' && homeView === 'history' && <HistoryScreen onBack={() => setHomeView('main')} transactions={transactions} />}
 
       {tab === 'rates' && <RatesScreen />}
       {tab === 'crypto' && <CryptoScreen />}
-      {tab === 'cards' && <CardsScreen />}
+      {tab === 'cards' && <CardsScreen fullName={profile?.full_name || ''} />}
 
       {tab === 'profile' && profileView === 'main' && (
         <ProfileScreen onLogout={handleLogout} onOpenReferrals={() => setProfileView('referrals')} />
