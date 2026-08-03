@@ -165,7 +165,7 @@ function LogoMark({ size = 26 }) {
 // ---------- Auth screens ----------
 function AuthShell({ children, title, subtitle }) {
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-6 py-12">
+    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-6" style={{ paddingTop: 'calc(3rem + env(safe-area-inset-top))', paddingBottom: 'calc(3rem + env(safe-area-inset-bottom))' }}>
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-2 mb-10 justify-center">
           <LogoMark size={24} />
@@ -1170,12 +1170,12 @@ function AppShell({ tab, setTab, children }) {
         </nav>
       </aside>
 
-      <main className="flex-1 max-w-2xl mx-auto w-full px-5 sm:px-8 py-8 pb-28 md:pb-8">
+      <main className="flex-1 max-w-2xl mx-auto w-full px-5 sm:px-8 pb-28 md:pb-8" style={{ paddingTop: 'calc(2rem + env(safe-area-inset-top))' }}>
         {children}
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur-md border-t border-neutral-900 flex justify-around py-2.5 z-40">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur-md border-t border-neutral-900 flex justify-around py-2.5 z-40" style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}>
         {NAV.map(n => (
           <button key={n.key} onClick={() => setTab(n.key)} className="flex flex-col items-center gap-1 px-3 py-1">
             <n.icon className={`w-5 h-5 ${tab === n.key ? 'text-white' : 'text-neutral-600'}`} />
