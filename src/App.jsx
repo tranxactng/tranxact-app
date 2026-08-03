@@ -397,11 +397,9 @@ function BalanceCard({ visible, onToggle, onFund, balance = 0 }) {
             {visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
           </button>
         </div>
-        <div className="font-mono text-3xl sm:text-4xl font-semibold tracking-tight mb-1">
+        <div className="font-mono text-3xl sm:text-4xl font-semibold tracking-tight mb-5">
           {visible ? fmtNaira(balance) : '₦ • • • • • •'}
         </div>
-        {visible && <div className="text-neutral-500 text-sm mb-5 font-mono">≈ ${(balance / 1550).toFixed(2)}</div>}
-        {!visible && <div className="mb-5" />}
         <button onClick={onFund} className="bg-white text-black font-semibold rounded-xl px-5 py-2.5 text-sm flex items-center gap-2 hover:bg-neutral-200 transition active:scale-[0.98]">
           Fund Wallet <Plus className="w-4 h-4" />
         </button>
@@ -948,29 +946,73 @@ function TranxactPaySheet({ onClose }) {
 
 // ---------- Rates ----------
 function RatesScreen() {
+  const [rates, setRates] = useState(null); // null = loading
+  const [error, setError] = useState('');
+  const [fetchedAt, setFetchedAt] = useState(null);
+  const [now, setNow] = useState(Date.now());
+
+  const fetchRates = async () => {
+    const { data, error: err } = await supabase.rpc('get_public_rates');
+    if (err) { setError(err.message); return; }
+    setRates(data || []);
+    setFetchedAt(Date.now());
+    setError('');
+  };
+
+  useEffect(() => {
+    fetchRates();
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    if (!rates || !fetchedAt) return;
+    const elapsed = Math.floor((now - fetchedAt) / 1000);
+    const anyDue = rates.some(r => r.seconds_until_next_update - elapsed <= 0);
+    if (anyDue) fetchRates();
+  }, [now, rates, fetchedAt]);
+
+  const fmtCountdown = (secondsLeft) => {
+    const s = Math.max(0, secondsLeft);
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return `${m}:${sec}`;
+  };
+
   return (
     <div>
       <h1 className="text-xl font-bold mb-1">Rates</h1>
-      <p className="text-xs text-neutral-600 mb-6">Updated every 10 minutes</p>
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
-        {ASSETS.map(a => (
-          <div key={a.symbol} className="flex items-center justify-between px-4 py-4">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center font-mono text-xs">{a.symbol.slice(0, 1)}</div>
-              <div>
-                <div className="text-sm font-medium">{a.symbol}</div>
-                <div className="text-xs text-neutral-500">{a.name}</div>
+      <p className="text-xs text-neutral-600 mb-6">Updates every 10 minutes</p>
+
+      {rates === null && !error && (
+        <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+      )}
+      {error && <p className="text-sm text-red-400">{error}</p>}
+
+      {rates && (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+          {rates.map(r => {
+            const elapsed = fetchedAt ? Math.floor((now - fetchedAt) / 1000) : 0;
+            const secondsLeft = r.seconds_until_next_update - elapsed;
+            const asset = ASSETS.find(a => a.symbol === r.coin);
+            return (
+              <div key={r.coin} className="flex items-center justify-between px-4 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center font-mono text-xs">{r.coin.slice(0, 1)}</div>
+                  <div>
+                    <div className="text-sm font-medium">{r.coin}</div>
+                    <div className="text-xs text-neutral-500">{asset?.name || r.coin}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-mono text-sm">₦{Number(r.conversion_rate).toLocaleString()}</div>
+                  <div className="text-xs font-mono text-neutral-600">{fmtCountdown(secondsLeft)}</div>
+                </div>
               </div>
-            </div>
-            <div className="text-right">
-              <div className="font-mono text-sm">₦{a.price.toLocaleString()}</div>
-              <div className={`text-xs font-mono ${a.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {a.change >= 0 ? '↑' : '↓'} {Math.abs(a.change)}%
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
