@@ -50,13 +50,52 @@ export async function getCryptoAssets() {
 }
 
 export async function getRecentTransactions(userId, limit = 20) {
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('*')
+  const { data: wallet, error: walletErr } = await supabase
+    .from('wallets')
+    .select('id')
     .eq('user_id', userId)
+    .maybeSingle();
+  if (walletErr || !wallet) return { data: [], error: walletErr };
+
+  const { data, error } = await supabase
+    .from('ledger_entries')
+    .select('amount, transaction_id, created_at, transactions(type, status, counterparty, description, crypto_asset)')
+    .eq('wallet_id', wallet.id)
     .order('created_at', { ascending: false })
     .limit(limit);
-  return { data, error };
+
+  if (error) return { data: null, error };
+
+  const mapped = (data || []).map(row => ({
+    id: row.transaction_id,
+    type: row.transactions?.type,
+    status: row.transactions?.status,
+    amount_ngn: row.amount, // signed, correct from THIS wallet's perspective
+    crypto_asset: row.transactions?.crypto_asset,
+    counterparty: row.transactions?.counterparty,
+    description: row.transactions?.description,
+    created_at: row.created_at,
+  }));
+
+  return { data: mapped, error: null };
+}
+
+// Calls the deployed edge function to send naira to another Tranxact user by username.
+export async function sendToUser(username, amount) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/transfer-to-user`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ username, amount }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Transfer failed');
+  return data; // { success, transaction_id, recipient_username }
 }
 
 // Calls the deployed edge function to get (or create) a deposit address for the given asset.
