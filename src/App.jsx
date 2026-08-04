@@ -987,8 +987,7 @@ function RatesScreen() {
   const secondsLeft = rates && rates[0] ? rates[0].seconds_until_next_update - elapsed : 0;
 
   const selectedRate = rates?.find(r => r.coin === calcAsset);
-  const amountNum = parseFloat(calcAmount) || 0;
-  const amountUsd = amountNum * Number(selectedRate?.usd_market_price || 0);
+  const amountUsd = parseFloat(calcAmount) || 0;
   const feeUsd = amountUsd * (FEE_PCT / 100);
   const nairaReceived = selectedRate ? (amountUsd - feeUsd) * Number(selectedRate.effective_rate) : 0;
 
@@ -1035,15 +1034,18 @@ function RatesScreen() {
       {rates && tab === 'calculator' && (
         <div className="space-y-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
-            <div className="text-xs text-neutral-500 mb-2">You send</div>
+            <div className="text-xs text-neutral-500 mb-2">You send (USD)</div>
             <div className="flex items-center justify-between gap-3">
-              <input
-                type="number"
-                value={calcAmount}
-                onChange={e => setCalcAmount(e.target.value)}
-                placeholder="0.00"
-                className="bg-transparent text-2xl font-mono font-semibold outline-none w-full text-white placeholder-neutral-700"
-              />
+              <div className="flex items-center gap-1 w-full">
+                <span className="text-2xl font-mono font-semibold text-neutral-500">$</span>
+                <input
+                  type="number"
+                  value={calcAmount}
+                  onChange={e => setCalcAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="bg-transparent text-2xl font-mono font-semibold outline-none w-full text-white placeholder-neutral-700"
+                />
+              </div>
               <select
                 value={calcAsset}
                 onChange={e => setCalcAsset(e.target.value)}
@@ -1052,6 +1054,7 @@ function RatesScreen() {
                 {rates.map(r => <option key={r.coin} value={r.coin} className="bg-neutral-900">{r.coin}</option>)}
               </select>
             </div>
+            <p className="text-xs text-neutral-600 mt-2">Paid in {calcAsset}</p>
           </div>
 
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 space-y-3">
