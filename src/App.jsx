@@ -946,10 +946,15 @@ function TranxactPaySheet({ onClose }) {
 
 // ---------- Rates ----------
 function RatesScreen() {
-  const [rates, setRates] = useState(null); // null = loading
+  const [tab, setTab] = useState('rates');
+  const [rates, setRates] = useState(null);
   const [error, setError] = useState('');
   const [fetchedAt, setFetchedAt] = useState(null);
   const [now, setNow] = useState(Date.now());
+  const [calcAsset, setCalcAsset] = useState('USDT');
+  const [calcAmount, setCalcAmount] = useState('');
+
+  const FEE_PCT = 0.7; // matches the platform's real crypto funding fee
 
   const fetchRates = async () => {
     const { data, error: err } = await supabase.rpc('get_public_rates');
@@ -968,8 +973,7 @@ function RatesScreen() {
   useEffect(() => {
     if (!rates || !fetchedAt) return;
     const elapsed = Math.floor((now - fetchedAt) / 1000);
-    const anyDue = rates.some(r => r.seconds_until_next_update - elapsed <= 0);
-    if (anyDue) fetchRates();
+    if (rates[0] && rates[0].seconds_until_next_update - elapsed <= 0) fetchRates();
   }, [now, rates, fetchedAt]);
 
   const fmtCountdown = (secondsLeft) => {
@@ -979,21 +983,38 @@ function RatesScreen() {
     return `${m}:${sec}`;
   };
 
+  const elapsed = fetchedAt ? Math.floor((now - fetchedAt) / 1000) : 0;
+  const secondsLeft = rates && rates[0] ? rates[0].seconds_until_next_update - elapsed : 0;
+
+  const selectedRate = rates?.find(r => r.coin === calcAsset);
+  const amountNum = parseFloat(calcAmount) || 0;
+  const amountUsd = amountNum * Number(selectedRate?.usd_market_price || 0);
+  const feeUsd = amountUsd * (FEE_PCT / 100);
+  const nairaReceived = selectedRate ? (amountUsd - feeUsd) * Number(selectedRate.effective_rate) : 0;
+
   return (
     <div>
-      <h1 className="text-xl font-bold mb-1">Rates</h1>
-      <p className="text-xs text-neutral-600 mb-6">Updates every 10 minutes</p>
+      <h1 className="text-xl font-bold mb-4">Rates</h1>
+
+      <TabToggle
+        value={tab}
+        onChange={setTab}
+        options={[{ value: 'rates', label: 'Rates' }, { value: 'calculator', label: 'Calculator' }]}
+      />
+
+      <div className="bg-violet-500/10 border border-violet-500/30 rounded-2xl py-5 text-center mb-5">
+        <div className="text-xs text-violet-300 mb-1">Rate refreshes in</div>
+        <div className="font-mono text-3xl font-bold text-violet-100">{fmtCountdown(secondsLeft)}</div>
+      </div>
 
       {rates === null && !error && (
         <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
       )}
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      {rates && (
+      {rates && tab === 'rates' && (
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
           {rates.map(r => {
-            const elapsed = fetchedAt ? Math.floor((now - fetchedAt) / 1000) : 0;
-            const secondsLeft = r.seconds_until_next_update - elapsed;
             const asset = ASSETS.find(a => a.symbol === r.coin);
             return (
               <div key={r.coin} className="flex items-center justify-between px-4 py-4">
@@ -1004,13 +1025,52 @@ function RatesScreen() {
                     <div className="text-xs text-neutral-500">{asset?.name || r.coin}</div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="font-mono text-sm">₦{Number(r.conversion_rate).toLocaleString()}</div>
-                  <div className="text-xs font-mono text-neutral-600">{fmtCountdown(secondsLeft)}</div>
-                </div>
+                <div className="font-mono text-sm">$1 = ₦{Number(r.effective_rate).toLocaleString()}</div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {rates && tab === 'calculator' && (
+        <div className="space-y-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+            <div className="text-xs text-neutral-500 mb-2">You send</div>
+            <div className="flex items-center justify-between gap-3">
+              <input
+                type="number"
+                value={calcAmount}
+                onChange={e => setCalcAmount(e.target.value)}
+                placeholder="0.00"
+                className="bg-transparent text-2xl font-mono font-semibold outline-none w-full text-white placeholder-neutral-700"
+              />
+              <select
+                value={calcAsset}
+                onChange={e => setCalcAsset(e.target.value)}
+                className="bg-neutral-900 border border-neutral-800 rounded-full px-3 py-2 text-sm flex-shrink-0"
+              >
+                {rates.map(r => <option key={r.coin} value={r.coin} className="bg-neutral-900">{r.coin}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 space-y-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-neutral-500">Exchange Rate</span>
+              <span className="font-mono">$1 = ₦{selectedRate ? Number(selectedRate.effective_rate).toLocaleString() : '—'}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-neutral-500">Fee</span>
+              <span className="font-mono">{FEE_PCT}% = ${feeUsd.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+            <div className="text-xs text-neutral-500 mb-2">You receive</div>
+            <div className="font-mono text-2xl font-semibold">
+              ₦{nairaReceived.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </div>
+          </div>
         </div>
       )}
     </div>
