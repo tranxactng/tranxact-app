@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
-  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions
+  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -740,10 +740,31 @@ function SendScreen({ onBack, onDone }) {
   const [bank, setBank] = useState(BANKS[0]);
   const [accountNumber, setAccountNumber] = useState('');
   const [amount, setAmount] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const resolvedName = accountNumber.length === 10 ? 'ADAEZE C. OKAFOR' : '';
   const recipientLabel = mode === 'user' ? `@${username}` : `${resolvedName || accountNumber} · ${bank}`;
   const canReview = mode === 'user' ? (username && amount) : (accountNumber.length === 10 && amount);
+
+  const handleConfirm = async () => {
+    if (mode === 'bank') {
+      // Bank transfers aren't wired to a payout provider yet — stays a UI-only
+      // preview until that's built.
+      setStep('success');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      await sendToUser(username, Number(amount));
+      setStep('success');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (step === 'success') {
     return (
@@ -768,7 +789,10 @@ function SendScreen({ onBack, onDone }) {
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(Number(amount) || 0)}</span></div>
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Fee</span><span className="font-mono">₦0.00</span></div>
         </div>
-        <PrimaryButton onClick={() => setStep('success')}>Confirm &amp; Send</PrimaryButton>
+        {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
+        <PrimaryButton onClick={handleConfirm} disabled={loading}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm & Send'}
+        </PrimaryButton>
       </div>
     );
   }
@@ -1393,7 +1417,12 @@ export default function TranxactApp() {
       )}
       {tab === 'home' && homeView === 'fund' && <FundWalletScreen onBack={() => setHomeView('main')} username={profile?.username || ''} />}
       {tab === 'home' && homeView === 'receive' && <ReceiveScreen onBack={() => setHomeView('main')} />}
-      {tab === 'home' && homeView === 'send' && <SendScreen onBack={() => setHomeView('main')} onDone={() => setHomeView('main')} />}
+      {tab === 'home' && homeView === 'send' && (
+        <SendScreen
+          onBack={() => setHomeView('main')}
+          onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
+        />
+      )}
       {tab === 'home' && homeView === 'history' && <HistoryScreen onBack={() => setHomeView('main')} transactions={transactions} />}
 
       {tab === 'rates' && <RatesScreen />}
