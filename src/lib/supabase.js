@@ -230,3 +230,62 @@ export async function updatePushPreference(enabled) {
   if (error) throw new Error(error.message);
   return true;
 }
+
+export async function createPaymentLink({ title, description, link_type, amount, is_tip }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment-link`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ title, description, link_type, amount, is_tip }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to create payment link');
+  return data; // { success, id, slug, url }
+}
+
+export async function getMyPaymentLinks() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { data, error } = await supabase
+    .from('payment_links')
+    .select('id, slug, title, description, link_type, amount, is_tip, status, created_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+// Public — works without auth, for the checkout page
+export async function getPublicPaymentLink(slug) {
+  const { data, error } = await supabase.rpc('get_payment_link', { p_slug: slug });
+  if (error) throw new Error(error.message);
+  return data && data[0] ? data[0] : null;
+}
+
+export async function getMyTranxactPayments() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { data: wallet } = await supabase.from('wallets').select('id').eq('user_id', user.id).maybeSingle();
+  if (!wallet) return [];
+
+  const { data, error } = await supabase
+    .from('ledger_entries')
+    .select('amount, created_at, transactions!inner(type, status, description, payment_link_id, payment_links(title))')
+    .eq('wallet_id', wallet.id)
+    .eq('transactions.type', 'tranxactpay')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+
+  return (data || []).map(row => ({
+    amount: row.amount,
+    created_at: row.created_at,
+    status: row.transactions.status,
+    description: row.transactions.description,
+    link_title: row.transactions.payment_links?.title || null,
+  }));
+}
