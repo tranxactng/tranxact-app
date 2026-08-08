@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
-  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, askXactAI
+  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, askXactAI,
+  adminLookupUser, adminRecentSettlements, adminSettle
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -1353,6 +1354,178 @@ function CardsScreen({ fullName = '' }) {
 }
 
 // ---------- Profile ----------
+// ---------- Admin ----------
+function AdminScreen() {
+  const [searchUsername, setSearchUsername] = useState('');
+  const [lookupResult, setLookupResult] = useState(null);
+  const [lookupError, setLookupError] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+
+  const [settleType, setSettleType] = useState('crypto_deposit');
+  const [cryptoAsset, setCryptoAsset] = useState('ETH');
+  const [cryptoAmount, setCryptoAmount] = useState('');
+  const [bankAmount, setBankAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [settleLoading, setSettleLoading] = useState(false);
+  const [settleError, setSettleError] = useState('');
+  const [settleSuccess, setSettleSuccess] = useState(null);
+
+  const [settlements, setSettlements] = useState(null);
+
+  const loadSettlements = async () => {
+    try {
+      const res = await adminRecentSettlements();
+      setSettlements(res.settlements || []);
+    } catch {
+      setSettlements([]);
+    }
+  };
+
+  useEffect(() => { loadSettlements(); }, []);
+
+  const handleLookup = async () => {
+    if (!searchUsername.trim()) return;
+    setLookupLoading(true);
+    setLookupError('');
+    setLookupResult(null);
+    try {
+      const res = await adminLookupUser(searchUsername);
+      setLookupResult(res);
+    } catch (e) {
+      setLookupError(e.message);
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  const handleSettle = async () => {
+    setSettleError('');
+    setSettleSuccess(null);
+    setSettleLoading(true);
+    try {
+      const payload = {
+        type: settleType,
+        target_username: lookupResult?.username || searchUsername,
+        description: description || undefined,
+      };
+      if (settleType === 'crypto_deposit') {
+        payload.crypto_asset = cryptoAsset;
+        payload.crypto_amount = Number(cryptoAmount);
+      } else {
+        payload.amount_ngn = Number(bankAmount);
+      }
+      const res = await adminSettle(payload);
+      setSettleSuccess(res);
+      setCryptoAmount('');
+      setBankAmount('');
+      setDescription('');
+      handleLookup();
+      loadSettlements();
+    } catch (e) {
+      setSettleError(e.message);
+    } finally {
+      setSettleLoading(false);
+    }
+  };
+
+  const canSettle = Boolean(lookupResult?.username || searchUsername.trim());
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-xl font-bold">Admin</h1>
+
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+        <div className="text-xs text-neutral-500 mb-2">Find user</div>
+        <div className="flex gap-2">
+          <input
+            value={searchUsername}
+            onChange={e => setSearchUsername(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleLookup(); }}
+            placeholder="username"
+            className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm flex-1 outline-none text-white placeholder-neutral-600"
+          />
+          <button onClick={handleLookup} disabled={lookupLoading} className="bg-white text-black rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-50 flex-shrink-0">
+            {lookupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Find'}
+          </button>
+        </div>
+        {lookupError && <p className="text-sm text-red-400 mt-3">{lookupError}</p>}
+        {lookupResult && (
+          <div className="mt-4 bg-neutral-900 border border-neutral-800 rounded-xl p-4">
+            <div className="flex justify-between items-center mb-2">
+              <span className="font-semibold">@{lookupResult.username}</span>
+              <span className="font-mono text-sm">{fmtNaira(lookupResult.balance)}</span>
+            </div>
+            {lookupResult.recent_transactions?.length > 0 && (
+              <div className="mt-3 space-y-2 pt-3 border-t border-neutral-800">
+                {lookupResult.recent_transactions.map((t, i) => (
+                  <div key={i} className="flex justify-between text-xs text-neutral-500">
+                    <span>{t.type}{t.crypto_asset ? ` (${t.crypto_asset})` : ''}</span>
+                    <span className={Number(t.amount) >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                      {Number(t.amount) >= 0 ? '+' : ''}{fmtNaira(t.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+        <div className="text-xs text-neutral-500 mb-3">Settle a deposit</div>
+        <TabToggle
+          value={settleType}
+          onChange={setSettleType}
+          options={[{ value: 'crypto_deposit', label: 'Crypto' }, { value: 'fund_bank', label: 'Bank' }]}
+        />
+        {settleType === 'crypto_deposit' ? (
+          <div className="space-y-3">
+            <select value={cryptoAsset} onChange={e => setCryptoAsset(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full">
+              {ASSETS.map(a => <option key={a.symbol} value={a.symbol} className="bg-neutral-900">{a.symbol}</option>)}
+            </select>
+            <Field label={`Amount received (${cryptoAsset})`} type="number" value={cryptoAmount} onChange={e => setCryptoAmount(e.target.value)} placeholder="0.00" />
+          </div>
+        ) : (
+          <Field label="Amount received (NGN)" type="number" value={bankAmount} onChange={e => setBankAmount(e.target.value)} placeholder="0.00" />
+        )}
+        <div className="mt-3">
+          <Field label="Note (optional)" value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. tx hash or reference" />
+        </div>
+        {settleError && <p className="text-sm text-red-400 mt-3">{settleError}</p>}
+        {settleSuccess && (
+          <p className="text-sm text-emerald-400 mt-3">
+            ✓ Credited {fmtNaira(settleSuccess.amount_ngn)} to @{settleSuccess.target_username}
+          </p>
+        )}
+        <PrimaryButton onClick={handleSettle} disabled={settleLoading || !canSettle} className="mt-4">
+          {settleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Settle'}
+        </PrimaryButton>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-3">Recent Settlements</h2>
+        {settlements === null ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+        ) : settlements.length === 0 ? (
+          <p className="text-sm text-neutral-500">No settlements yet.</p>
+        ) : (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+            {settlements.map(s => (
+              <div key={s.id} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <div className="text-sm font-medium">@{s.username}</div>
+                  <div className="text-xs text-neutral-500">{s.type}{s.crypto_asset ? ` · ${s.crypto_asset}` : ''}</div>
+                </div>
+                <span className="font-mono text-sm">{fmtNaira(s.amount_ngn)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProfileScreen({ onLogout, onOpenReferrals }) {
   const items = [
     { label: 'Account details', icon: UserCircle },
@@ -1476,7 +1649,8 @@ function LeaderboardScreen({ onBack }) {
 }
 
 // ---------- App shell (nav) ----------
-function AppShell({ tab, setTab, children }) {
+function AppShell({ tab, setTab, isAdmin = false, children }) {
+  const navItems = isAdmin ? [...NAV, { key: 'admin', label: 'Admin', icon: ShieldCheck }] : NAV;
   return (
     <div className="min-h-screen bg-black text-white flex">
       {/* Desktop sidebar */}
@@ -1486,7 +1660,7 @@ function AppShell({ tab, setTab, children }) {
           <span className="font-bold tracking-tight">Tranxact</span>
         </div>
         <nav className="space-y-1">
-          {NAV.map(n => (
+          {navItems.map(n => (
             <button
               key={n.key}
               onClick={() => setTab(n.key)}
@@ -1505,7 +1679,7 @@ function AppShell({ tab, setTab, children }) {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur-md border-t border-neutral-900 flex justify-around py-2.5 z-40" style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}>
-        {NAV.map(n => (
+        {navItems.map(n => (
           <button key={n.key} onClick={() => setTab(n.key)} className="flex flex-col items-center gap-1 px-3 py-1">
             <n.icon className={`w-5 h-5 ${tab === n.key ? 'text-white' : 'text-neutral-600'}`} />
             <span className={`text-[10px] ${tab === n.key ? 'text-white' : 'text-neutral-600'}`}>{n.label}</span>
@@ -1600,7 +1774,7 @@ export default function TranxactApp() {
   const balance = wallet ? Number(wallet.balance) : 0;
 
   return (
-    <AppShell tab={tab} setTab={(t) => { setTab(t); setHomeView('main'); setProfileView('main'); }}>
+    <AppShell tab={tab} setTab={(t) => { setTab(t); setHomeView('main'); setProfileView('main'); }} isAdmin={profile?.is_admin === true}>
       {tab === 'home' && homeView === 'main' && (
         <HomeScreen
           balanceVisible={balanceVisible}
@@ -1637,6 +1811,7 @@ export default function TranxactApp() {
       {tab === 'rates' && <RatesScreen />}
       {tab === 'crypto' && <CryptoScreen />}
       {tab === 'cards' && <CardsScreen fullName={profile?.full_name || ''} />}
+      {tab === 'admin' && profile?.is_admin === true && <AdminScreen />}
 
       {tab === 'profile' && profileView === 'main' && (
         <ProfileScreen onLogout={handleLogout} onOpenReferrals={() => setProfileView('referrals')} />
