@@ -337,3 +337,32 @@ export async function adminListPaymentNotices() {
 export async function adminGetOverviewStats() {
   return callAdminFunction('admin-overview-stats', {});
 }
+
+export async function requestWithdrawal({ amount, bank_name, account_number, account_name }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/request-withdrawal`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ amount, bank_name, account_number, account_name }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Withdrawal request failed');
+  return data; // { success, request_id, amount }
+}
+
+export async function getMyWithdrawals() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { data, error } = await supabase
+    .from('withdrawal_requests')
+    .select('id, amount, bank_name, account_number, account_name, status, admin_note, created_at, processed_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
