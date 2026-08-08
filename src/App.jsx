@@ -8,7 +8,9 @@ import {
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, askXactAI,
-  adminLookupUser, adminRecentSettlements, adminSettle
+  adminLookupUser, adminRecentSettlements, adminSettle,
+  getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
+  changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -60,20 +62,11 @@ const NAV = [
 
 const BANKS = ['Access Bank', 'GTBank', 'Zenith Bank', 'UBA', 'First Bank', 'Kuda', 'Opay', 'Moniepoint', 'Wema Bank', 'Fidelity Bank'];
 
-const LEADERBOARD_ALLTIME = [
-  { name: '@zainab_k', amount: 240500 },
-  { name: '@michael.o', amount: 198200 },
-  { name: 'You', amount: 18500 },
-  { name: '@fadeke', amount: 12300 },
-  { name: '@chuks_b', amount: 9800 },
-];
-const LEADERBOARD_MONTH = [
-  { name: '@michael.o', amount: 42500 },
-  { name: 'You', amount: 18500 },
-  { name: '@zainab_k', amount: 15200 },
-  { name: '@fadeke', amount: 6300 },
-  { name: '@chuks_b', amount: 4100 },
-];
+// Mirrors fee_settings in the database, for preview purposes only — the actual
+// fee applied always comes from the server, this is just so the admin sees an
+// accurate preview before submitting.
+const CRYPTO_FUNDING_FEE_PCT = 0.7;
+const NAIRA_FUNDING_FEE_FLAT = 100;
 
 const fmtNaira = (n) =>
   `₦${Math.abs(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -286,6 +279,7 @@ function SignupScreen({ onSignup, goLogin }) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
@@ -295,7 +289,8 @@ function SignupScreen({ onSignup, goLogin }) {
     setError('');
     setLoading(true);
     const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    const { data, error: err } = await signUp({ email, password, username: cleanUsername, fullName });
+    const cleanReferral = referralCode.trim().toLowerCase().replace(/^@/, '');
+    const { data, error: err } = await signUp({ email, password, username: cleanUsername, fullName, referralCode: cleanReferral || null });
     setLoading(false);
     if (err) { setError(err.message); return; }
     if (!data.session) { setNeedsConfirmation(true); return; }
@@ -337,6 +332,7 @@ function SignupScreen({ onSignup, goLogin }) {
             </button>
           </div>
         </label>
+        <Field label="Referral code (optional)" icon={Users} type="text" placeholder="username of whoever referred you" value={referralCode} onChange={e => setReferralCode(e.target.value)} />
         {error && <p className="text-sm text-red-400">{error}</p>}
         <PrimaryButton type="submit" className="mt-2" disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Create Account <ArrowRight className="w-4 h-4" /></>}
@@ -1507,17 +1503,48 @@ function AdminScreen() {
               const rateRow = rates?.find(r => r.coin === cryptoAsset);
               const usd = parseFloat(amountUsd) || 0;
               if (!rateRow || usd <= 0) return null;
-              const naira = usd * Number(rateRow.effective_rate);
+              const gross = usd * Number(rateRow.effective_rate);
+              const fee = gross * (CRYPTO_FUNDING_FEE_PCT / 100);
+              const net = gross - fee;
               return (
-                <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4">
-                  <div className="text-xs text-violet-300 mb-1">This will credit</div>
-                  <div className="font-mono text-2xl font-bold text-violet-100">{fmtNaira(naira)}</div>
+                <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4 space-y-2">
+                  <div className="flex justify-between text-xs text-violet-300">
+                    <span>Gross value</span>
+                    <span className="font-mono">{fmtNaira(gross)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-violet-300">
+                    <span>Fee ({CRYPTO_FUNDING_FEE_PCT}%)</span>
+                    <span className="font-mono">-{fmtNaira(fee)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-violet-500/20">
+                    <span className="text-xs text-violet-300">User receives</span>
+                    <span className="font-mono text-xl font-bold text-violet-100">{fmtNaira(net)}</span>
+                  </div>
                 </div>
               );
             })()}
           </div>
         ) : (
-          <Field label="Amount received (NGN)" type="number" value={bankAmount} onChange={e => setBankAmount(e.target.value)} placeholder="0.00" />
+          <div className="space-y-3">
+            <Field label="Amount received (NGN)" type="number" value={bankAmount} onChange={e => setBankAmount(e.target.value)} placeholder="0.00" />
+            {(() => {
+              const gross = parseFloat(bankAmount) || 0;
+              if (gross <= 0) return null;
+              const net = gross - NAIRA_FUNDING_FEE_FLAT;
+              return (
+                <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4 space-y-2">
+                  <div className="flex justify-between text-xs text-violet-300">
+                    <span>Fee (flat)</span>
+                    <span className="font-mono">-{fmtNaira(NAIRA_FUNDING_FEE_FLAT)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-violet-500/20">
+                    <span className="text-xs text-violet-300">User receives</span>
+                    <span className="font-mono text-xl font-bold text-violet-100">{fmtNaira(net)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         )}
         <div className="mt-3">
           <Field label="Note (optional)" value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. tx hash or reference" />
@@ -1525,7 +1552,8 @@ function AdminScreen() {
         {settleError && <p className="text-sm text-red-400 mt-3">{settleError}</p>}
         {settleSuccess && (
           <p className="text-sm text-emerald-400 mt-3">
-            ✓ Credited {fmtNaira(settleSuccess.amount_ngn)} to @{settleSuccess.target_username}
+            ✓ Credited {fmtNaira(settleSuccess.net_ngn)} to @{settleSuccess.target_username}
+            {settleSuccess.fee_ngn > 0 && <span className="text-neutral-500"> (fee: {fmtNaira(settleSuccess.fee_ngn)})</span>}
           </p>
         )}
         <PrimaryButton onClick={handleSettle} disabled={settleLoading || !canSettle} className="mt-4">
@@ -1557,14 +1585,243 @@ function AdminScreen() {
   );
 }
 
-function ProfileScreen({ onLogout, onOpenReferrals }) {
+function UsernameScreen({ onBack, currentUsername, onChanged }) {
+  const [value, setValue] = useState(currentUsername || '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess(false);
+    setLoading(true);
+    try {
+      await changeUsername(value);
+      setSuccess(true);
+      onChanged?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <BackHeader title="Username" onBack={onBack} />
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Username" value={value} onChange={e => setValue(e.target.value)} placeholder="username" />
+        <p className="text-xs text-neutral-600">
+          Once you change your username, no one else can ever claim your old one — it stays permanently reserved to you.
+        </p>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        {success && <p className="text-sm text-emerald-400">Username updated.</p>}
+        <PrimaryButton type="submit" disabled={loading || !value.trim()}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+        </PrimaryButton>
+      </form>
+    </div>
+  );
+}
+
+function SecurityScreen({ onBack }) {
+  const [newPassword, setNewPassword] = useState('');
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState(false);
+
+  const [pin, setPin] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
+  const [pinError, setPinError] = useState('');
+  const [pinSuccess, setPinSuccess] = useState(false);
+
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    setPwError('');
+    setPwSuccess(false);
+    setPwLoading(true);
+    try {
+      await updatePassword(newPassword);
+      setPwSuccess(true);
+      setNewPassword('');
+    } catch (e) {
+      setPwError(e.message);
+    } finally {
+      setPwLoading(false);
+    }
+  };
+
+  const handlePinChange = async (e) => {
+    e.preventDefault();
+    setPinError('');
+    setPinSuccess(false);
+    setPinLoading(true);
+    try {
+      await setTransactionPin(pin);
+      setPinSuccess(true);
+      setPin('');
+    } catch (e) {
+      setPinError(e.message);
+    } finally {
+      setPinLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <BackHeader title="Security" onBack={onBack} />
+      <form onSubmit={handlePasswordChange} className="space-y-4">
+        <h2 className="text-sm font-semibold">Change password</h2>
+        <Field label="New password" type="password" minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters" />
+        {pwError && <p className="text-sm text-red-400">{pwError}</p>}
+        {pwSuccess && <p className="text-sm text-emerald-400">Password updated.</p>}
+        <PrimaryButton type="submit" disabled={pwLoading || newPassword.length < 8}>
+          {pwLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Update password'}
+        </PrimaryButton>
+      </form>
+
+      <form onSubmit={handlePinChange} className="space-y-4 pt-6 border-t border-neutral-900">
+        <h2 className="text-sm font-semibold">Transaction PIN</h2>
+        <Field label="New PIN (4-6 digits)" type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••" />
+        {pinError && <p className="text-sm text-red-400">{pinError}</p>}
+        {pinSuccess && <p className="text-sm text-emerald-400">PIN set.</p>}
+        <PrimaryButton type="submit" disabled={pinLoading || pin.length < 4}>
+          {pinLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Set PIN'}
+        </PrimaryButton>
+      </form>
+    </div>
+  );
+}
+
+function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
+  const [limit, setLimit] = useState(initialLimit != null ? String(initialLimit) : '');
+  const [limitLoading, setLimitLoading] = useState(false);
+  const [limitSaved, setLimitSaved] = useState(false);
+
+  const [pushEnabled, setPushEnabled] = useState(initialPushEnabled || false);
+  const [pushLoading, setPushLoading] = useState(false);
+
+  const saveLimit = async () => {
+    setLimitLoading(true);
+    setLimitSaved(false);
+    try {
+      await updateSpendingLimit(limit ? Number(limit) : null);
+      setLimitSaved(true);
+    } finally {
+      setLimitLoading(false);
+    }
+  };
+
+  const togglePush = async () => {
+    const next = !pushEnabled;
+    setPushEnabled(next);
+    setPushLoading(true);
+    try {
+      await updatePushPreference(next);
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <BackHeader title="Settings" onBack={onBack} />
+      <div>
+        <h2 className="text-sm font-semibold mb-3">Daily spending limit</h2>
+        <div className="flex gap-2">
+          <Field label="Amount (NGN, optional)" type="number" value={limit} onChange={e => setLimit(e.target.value)} placeholder="No limit set" />
+        </div>
+        <p className="text-xs text-neutral-600 mt-2">This is stored now — enforcement across Send/withdrawals is coming as those features grow.</p>
+        {limitSaved && <p className="text-sm text-emerald-400 mt-2">Saved.</p>}
+        <PrimaryButton onClick={saveLimit} disabled={limitLoading} className="mt-4">
+          {limitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save limit'}
+        </PrimaryButton>
+      </div>
+
+      <div className="pt-6 border-t border-neutral-900">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold">Push notifications</div>
+            <p className="text-xs text-neutral-600 mt-1">Your preference is saved now — actual push delivery is separate infrastructure not built yet.</p>
+          </div>
+          <button
+            onClick={togglePush}
+            disabled={pushLoading}
+            className={`w-12 h-7 rounded-full flex-shrink-0 flex items-center transition-colors ${pushEnabled ? 'bg-violet-600 justify-end' : 'bg-neutral-800 justify-start'} px-1`}
+          >
+            <span className="w-5 h-5 rounded-full bg-white block" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VerificationModal({ onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 text-center">
+        <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
+          <ShieldCheck className="w-6 h-6 text-emerald-400" />
+        </div>
+        <h2 className="text-lg font-bold mb-1">You are verified</h2>
+        <p className="text-sm text-neutral-500 mb-6">Your account is in good standing.</p>
+        <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+function SupportScreen({ onBack }) {
+  const faqs = [
+    { q: 'How do I fund my wallet?', a: 'Tap Fund Wallet on Home — you can pay via bank transfer to your Tranxact account, or send supported crypto.' },
+    { q: 'Which crypto coins are supported?', a: 'ETH, BTC, USDT (TRC20), and SOL. Received crypto converts to naira automatically.' },
+    { q: 'How long does a deposit take to reflect?', a: 'Usually a few minutes after the transfer or deposit is confirmed.' },
+    { q: 'Is sending to a Tranxact user free?', a: 'Yes — transfers between Tranxact users have no fee.' },
+  ];
+  return (
+    <div>
+      <BackHeader title="Help & Support" onBack={onBack} />
+      <a
+        href="https://wa.me/2347058866702"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-4 mb-4 hover:bg-neutral-900 transition"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-emerald-500/15 flex items-center justify-center"><Smartphone className="w-4 h-4 text-emerald-400" /></div>
+          <div>
+            <div className="text-sm font-medium">Chat with us on WhatsApp</div>
+            <div className="text-xs text-neutral-500">07058866702</div>
+          </div>
+        </div>
+        <ChevronRight className="w-4 h-4 text-neutral-600" />
+      </a>
+      <h2 className="text-sm font-semibold mb-3">Frequently asked questions</h2>
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+        {faqs.map((f, i) => (
+          <div key={i} className="px-4 py-4">
+            <div className="text-sm font-medium mb-1">{f.q}</div>
+            <div className="text-xs text-neutral-500">{f.a}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfileScreen({ onLogout, onOpenReferrals, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings }) {
+  const [showVerification, setShowVerification] = useState(false);
   const items = [
     { label: 'Account details', icon: UserCircle },
-    { label: 'Username', icon: User },
+    { label: 'Username', icon: User, onClick: onOpenUsername },
     { label: 'Referrals', icon: Users, onClick: onOpenReferrals },
-    { label: 'Verification', icon: ShieldCheck, badge: 'Verified' },
-    { label: 'Security', icon: Lock },
-    { label: 'Settings', icon: Settings },
+    { label: 'Verification', icon: ShieldCheck, badge: 'Verified', onClick: () => setShowVerification(true) },
+    { label: 'Security', icon: Lock, onClick: onOpenSecurity },
+    { label: 'Settings', icon: Settings, onClick: onOpenSettings },
+    { label: 'Help & Support', icon: Smartphone, onClick: onOpenSupport },
   ];
   return (
     <div>
@@ -1586,22 +1843,30 @@ function ProfileScreen({ onLogout, onOpenReferrals }) {
       <button onClick={onLogout} className="w-full flex items-center justify-center gap-2 text-red-400 text-sm font-medium py-3.5 hover:text-red-300 transition">
         <LogOut className="w-4 h-4" /> Log out
       </button>
+      {showVerification && <VerificationModal onClose={() => setShowVerification(false)} />}
     </div>
   );
 }
 
 // ---------- Referrals ----------
-function ReferralsScreen({ onBack, onEarnings, onLeaderboard }) {
-  const username = 'david';
+function ReferralsScreen({ onBack, onEarnings, onLeaderboard, username, userId }) {
   const [copied, setCopied] = useState(false);
+  const [pendingBalance, setPendingBalance] = useState(null);
+
+  useEffect(() => {
+    getReferralEarnings(userId).then(({ data }) => {
+      const total = (data || []).filter(e => e.status === 'pending').reduce((sum, e) => sum + Number(e.amount), 0);
+      setPendingBalance(total);
+    });
+  }, [userId]);
   return (
     <div>
       <BackHeader title="Referrals" onBack={onBack} />
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 mb-4 text-center">
         <p className="text-sm text-neutral-500 mb-2">Your referral code</p>
-        <div className="font-mono text-2xl font-semibold mb-4">@{username}</div>
+        <div className="font-mono text-2xl font-semibold mb-4">@{username || '—'}</div>
         <div className="grid grid-cols-2 gap-3">
-          <GhostButton onClick={() => { navigator.clipboard?.writeText(username); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
+          <GhostButton onClick={() => { navigator.clipboard?.writeText(username || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
             {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'Copied' : 'Copy code'}
           </GhostButton>
           <GhostButton><Share2 className="w-4 h-4" /> Share</GhostButton>
@@ -1614,7 +1879,7 @@ function ReferralsScreen({ onBack, onEarnings, onLeaderboard }) {
             <span className="text-sm font-medium">Referral Earnings</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-sm text-neutral-400">₦18,500.00</span>
+            <span className="font-mono text-sm text-neutral-400">{pendingBalance === null ? '···' : fmtNaira(pendingBalance)}</span>
             <ChevronRight className="w-4 h-4 text-neutral-600" />
           </div>
         </button>
@@ -1626,33 +1891,80 @@ function ReferralsScreen({ onBack, onEarnings, onLeaderboard }) {
           <ChevronRight className="w-4 h-4 text-neutral-600" />
         </button>
       </div>
-    </div>
-  );
-}
-
-function ReferralEarningsScreen({ onBack }) {
-  const [withdrawn, setWithdrawn] = useState(false);
-  return (
-    <div>
-      <BackHeader title="Referral Earnings" onBack={onBack} />
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 text-center mb-6">
-        <p className="text-sm text-neutral-500 mb-2">Available balance</p>
-        <div className="font-mono text-3xl font-semibold mb-5">₦18,500.00</div>
-        <PrimaryButton onClick={() => setWithdrawn(true)} disabled={withdrawn}>
-          {withdrawn ? <><Check className="w-4 h-4" /> Withdrawn to wallet</> : 'Withdraw to Tranxact Wallet'}
-        </PrimaryButton>
-      </div>
-      <h2 className="text-sm font-semibold mb-2">How it works</h2>
-      <p className="text-xs text-neutral-500">
-        Earn a share every time someone signs up with your code and transacts. Withdraw anytime to your main wallet balance.
+      <p className="text-xs text-neutral-600 mt-6 text-center">
+        You earn 25% of the crypto funding fee every time someone you referred receives crypto.
       </p>
     </div>
   );
 }
 
-function LeaderboardScreen({ onBack }) {
+function ReferralEarningsScreen({ onBack, userId, onWithdrawn }) {
+  const [earnings, setEarnings] = useState(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawn, setWithdrawn] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    const { data } = await getReferralEarnings(userId);
+    setEarnings(data || []);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const pendingBalance = (earnings || [])
+    .filter(e => e.status === 'pending')
+    .reduce((sum, e) => sum + Number(e.amount), 0);
+
+  const handleWithdraw = async () => {
+    setError('');
+    setWithdrawing(true);
+    try {
+      await withdrawReferralEarnings();
+      setWithdrawn(true);
+      await load();
+      onWithdrawn?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
+  return (
+    <div>
+      <BackHeader title="Referral Earnings" onBack={onBack} />
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 text-center mb-6">
+        <p className="text-sm text-neutral-500 mb-2">Available balance</p>
+        {earnings === null ? (
+          <div className="flex justify-center py-2 mb-5"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+        ) : (
+          <div className="font-mono text-3xl font-semibold mb-5">{fmtNaira(pendingBalance)}</div>
+        )}
+        {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+        <PrimaryButton onClick={handleWithdraw} disabled={withdrawing || pendingBalance <= 0 || withdrawn}>
+          {withdrawing ? <Loader2 className="w-4 h-4 animate-spin" /> : withdrawn ? <><Check className="w-4 h-4" /> Withdrawn to wallet</> : 'Withdraw to Tranxact Wallet'}
+        </PrimaryButton>
+      </div>
+      <h2 className="text-sm font-semibold mb-2">How it works</h2>
+      <p className="text-xs text-neutral-500">
+        Earn 25% of the crypto funding fee every time someone you referred receives crypto. Withdraw anytime to your main wallet balance.
+      </p>
+    </div>
+  );
+}
+
+function LeaderboardScreen({ onBack, myUsername }) {
   const [range, setRange] = useState('all');
-  const data = [...(range === 'all' ? LEADERBOARD_ALLTIME : LEADERBOARD_MONTH)].sort((a, b) => b.amount - a.amount);
+  const [data, setData] = useState(null);
+
+  const load = async (period) => {
+    setData(null);
+    const { data: rows } = await getReferralLeaderboard(period);
+    setData(rows || []);
+  };
+
+  useEffect(() => { load(range); }, [range]);
+
   return (
     <div>
       <BackHeader title="Leaderboard" onBack={onBack} />
@@ -1664,17 +1976,23 @@ function LeaderboardScreen({ onBack }) {
           { value: 'month', label: 'This Month' },
         ]}
       />
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
-        {data.map((row, i) => (
-          <div key={row.name} className={`flex items-center justify-between px-4 py-3.5 ${row.name === 'You' ? 'bg-violet-500/10' : ''}`}>
-            <div className="flex items-center gap-3">
-              <span className="w-5 text-sm text-neutral-500 font-mono">{i + 1}</span>
-              <span className={`text-sm ${row.name === 'You' ? 'font-semibold text-violet-300' : ''}`}>{row.name}</span>
+      {data === null ? (
+        <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+      ) : data.length === 0 ? (
+        <p className="text-sm text-neutral-500 text-center py-6">No referral earnings yet.</p>
+      ) : (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+          {data.map((row, i) => (
+            <div key={row.username} className={`flex items-center justify-between px-4 py-3.5 ${row.username === myUsername ? 'bg-violet-500/10' : ''}`}>
+              <div className="flex items-center gap-3">
+                <span className="w-5 text-sm text-neutral-500 font-mono">{i + 1}</span>
+                <span className={`text-sm ${row.username === myUsername ? 'font-semibold text-violet-300' : ''}`}>@{row.username}</span>
+              </div>
+              <span className="font-mono text-sm text-neutral-400">{fmtNaira(row.total_earned)}</span>
             </div>
-            <span className="font-mono text-sm text-neutral-400">₦{row.amount.toLocaleString()}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1727,7 +2045,7 @@ export default function TranxactApp() {
   const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | forgotSent | welcome | app
   const [tab, setTab] = useState('home');
   const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | xactai
-  const [profileView, setProfileView] = useState('main'); // main | referrals | earnings | leaderboard
+  const [profileView, setProfileView] = useState('main'); // main | referrals | earnings | leaderboard | support | username | security | settings
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [tpOpen, setTpOpen] = useState(false);
   const [profile, setProfile] = useState(null);
@@ -1845,17 +2163,50 @@ export default function TranxactApp() {
       {tab === 'admin' && profile?.is_admin === true && <AdminScreen />}
 
       {tab === 'profile' && profileView === 'main' && (
-        <ProfileScreen onLogout={handleLogout} onOpenReferrals={() => setProfileView('referrals')} />
+        <ProfileScreen
+          onLogout={handleLogout}
+          onOpenReferrals={() => setProfileView('referrals')}
+          onOpenSupport={() => setProfileView('support')}
+          onOpenUsername={() => setProfileView('username')}
+          onOpenSecurity={() => setProfileView('security')}
+          onOpenSettings={() => setProfileView('settings')}
+        />
       )}
       {tab === 'profile' && profileView === 'referrals' && (
         <ReferralsScreen
           onBack={() => setProfileView('main')}
           onEarnings={() => setProfileView('earnings')}
           onLeaderboard={() => setProfileView('leaderboard')}
+          username={profile?.username || ''}
+          userId={profile?.id}
         />
       )}
-      {tab === 'profile' && profileView === 'earnings' && <ReferralEarningsScreen onBack={() => setProfileView('referrals')} />}
-      {tab === 'profile' && profileView === 'leaderboard' && <LeaderboardScreen onBack={() => setProfileView('referrals')} />}
+      {tab === 'profile' && profileView === 'earnings' && (
+        <ReferralEarningsScreen
+          onBack={() => setProfileView('referrals')}
+          userId={profile?.id}
+          onWithdrawn={() => { if (profile?.id) loadUserData(profile.id); }}
+        />
+      )}
+      {tab === 'profile' && profileView === 'leaderboard' && (
+        <LeaderboardScreen onBack={() => setProfileView('referrals')} myUsername={profile?.username || ''} />
+      )}
+      {tab === 'profile' && profileView === 'support' && <SupportScreen onBack={() => setProfileView('main')} />}
+      {tab === 'profile' && profileView === 'username' && (
+        <UsernameScreen
+          onBack={() => setProfileView('main')}
+          currentUsername={profile?.username || ''}
+          onChanged={() => { if (profile?.id) loadUserData(profile.id); }}
+        />
+      )}
+      {tab === 'profile' && profileView === 'security' && <SecurityScreen onBack={() => setProfileView('main')} />}
+      {tab === 'profile' && profileView === 'settings' && (
+        <SettingsScreen
+          onBack={() => setProfileView('main')}
+          initialLimit={profile?.daily_spending_limit}
+          initialPushEnabled={profile?.push_notifications_enabled}
+        />
+      )}
 
       {tpOpen && <TranxactPaySheet onClose={() => setTpOpen(false)} />}
     </AppShell>
