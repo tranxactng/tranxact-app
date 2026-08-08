@@ -1363,12 +1363,13 @@ function AdminScreen() {
 
   const [settleType, setSettleType] = useState('crypto_deposit');
   const [cryptoAsset, setCryptoAsset] = useState('ETH');
-  const [cryptoAmount, setCryptoAmount] = useState('');
+  const [amountUsd, setAmountUsd] = useState('');
   const [bankAmount, setBankAmount] = useState('');
   const [description, setDescription] = useState('');
   const [settleLoading, setSettleLoading] = useState(false);
   const [settleError, setSettleError] = useState('');
   const [settleSuccess, setSettleSuccess] = useState(null);
+  const [rates, setRates] = useState(null);
 
   const [settlements, setSettlements] = useState(null);
 
@@ -1381,7 +1382,10 @@ function AdminScreen() {
     }
   };
 
-  useEffect(() => { loadSettlements(); }, []);
+  useEffect(() => {
+    loadSettlements();
+    supabase.rpc('get_public_rates').then(({ data }) => setRates(data || []));
+  }, []);
 
   const handleLookup = async () => {
     if (!searchUsername.trim()) return;
@@ -1410,13 +1414,13 @@ function AdminScreen() {
       };
       if (settleType === 'crypto_deposit') {
         payload.crypto_asset = cryptoAsset;
-        payload.crypto_amount = Number(cryptoAmount);
+        payload.amount_usd = Number(amountUsd);
       } else {
         payload.amount_ngn = Number(bankAmount);
       }
       const res = await adminSettle(payload);
       setSettleSuccess(res);
-      setCryptoAmount('');
+      setAmountUsd('');
       setBankAmount('');
       setDescription('');
       handleLookup();
@@ -1483,7 +1487,34 @@ function AdminScreen() {
             <select value={cryptoAsset} onChange={e => setCryptoAsset(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full">
               {ASSETS.map(a => <option key={a.symbol} value={a.symbol} className="bg-neutral-900">{a.symbol}</option>)}
             </select>
-            <Field label={`Amount received (${cryptoAsset})`} type="number" value={cryptoAmount} onChange={e => setCryptoAmount(e.target.value)} placeholder="0.00" />
+            <div>
+              <span className="text-sm text-neutral-400 mb-2 block">Amount received (USD)</span>
+              <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
+                <span className="text-neutral-500 font-mono">$</span>
+                <input
+                  type="number"
+                  value={amountUsd}
+                  onChange={e => setAmountUsd(e.target.value)}
+                  placeholder="0.00"
+                  className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full font-mono"
+                />
+              </div>
+              <p className="text-xs text-neutral-600 mt-1.5">
+                Enter the USD value of what was received — not the raw coin quantity. Most wallets/explorers show this directly.
+              </p>
+            </div>
+            {(() => {
+              const rateRow = rates?.find(r => r.coin === cryptoAsset);
+              const usd = parseFloat(amountUsd) || 0;
+              if (!rateRow || usd <= 0) return null;
+              const naira = usd * Number(rateRow.effective_rate);
+              return (
+                <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4">
+                  <div className="text-xs text-violet-300 mb-1">This will credit</div>
+                  <div className="font-mono text-2xl font-bold text-violet-100">{fmtNaira(naira)}</div>
+                </div>
+              );
+            })()}
           </div>
         ) : (
           <Field label="Amount received (NGN)" type="number" value={bankAmount} onChange={e => setBankAmount(e.target.value)} placeholder="0.00" />
