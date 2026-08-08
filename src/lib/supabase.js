@@ -135,3 +135,32 @@ export async function getDepositAddress(assetSymbol) {
   if (!res.ok) throw new Error(data.error || 'Failed to get deposit address');
   return data; // { address, derivation_index, asset }
 }
+
+async function callAdminFunction(fnName, payload) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+export async function adminLookupUser(username) {
+  return callAdminFunction('admin-lookup', { action: 'lookup_user', username });
+}
+
+export async function adminRecentSettlements() {
+  return callAdminFunction('admin-lookup', { action: 'recent_settlements' });
+}
+
+export async function adminSettle(payload) {
+  return callAdminFunction('admin-settle', payload);
+}
