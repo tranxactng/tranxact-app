@@ -273,13 +273,13 @@ function LoginScreen({ onLogin, goSignup, goForgot }) {
   );
 }
 
-function SignupScreen({ onSignup, goLogin }) {
+function SignupScreen({ onSignup, goLogin, initialReferralCode }) {
   const [showPw, setShowPw] = useState(false);
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [referralCode, setReferralCode] = useState('');
+  const [referralCode, setReferralCode] = useState(initialReferralCode || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
@@ -332,7 +332,12 @@ function SignupScreen({ onSignup, goLogin }) {
             </button>
           </div>
         </label>
-        <Field label="Referral code (optional)" icon={Users} type="text" placeholder="username of whoever referred you" value={referralCode} onChange={e => setReferralCode(e.target.value)} />
+        <div>
+          <Field label="Referral code (optional)" icon={Users} type="text" placeholder="username of whoever referred you" value={referralCode} onChange={e => setReferralCode(e.target.value)} />
+          {initialReferralCode && referralCode === initialReferralCode && (
+            <p className="text-xs text-emerald-400 mt-1.5">Applied from your referral link</p>
+          )}
+        </div>
         {error && <p className="text-sm text-red-400">{error}</p>}
         <PrimaryButton type="submit" className="mt-2" disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Create Account <ArrowRight className="w-4 h-4" /></>}
@@ -1323,27 +1328,39 @@ function CardsScreen({ fullName = '' }) {
   return (
     <div className="pt-4">
       <h1 className="text-xl font-bold mb-6">Cards</h1>
-      <div className="relative max-w-sm mx-auto">
-        <div className="relative rounded-3xl p-6 h-48 bg-gradient-to-br from-neutral-900 via-neutral-950 to-black border border-neutral-800 overflow-hidden flex flex-col justify-between">
-          <div className="absolute -right-10 -top-10 w-40 h-40 bg-violet-600/20 rounded-full blur-2xl" />
-          <div className="flex items-center justify-between relative z-10">
-            <LogoMark size={20} />
-            <div className="w-9 h-6 rounded-md bg-gradient-to-br from-neutral-400 to-neutral-600" />
-          </div>
-          <div className="relative z-10">
-            <div className="font-mono text-lg tracking-widest mb-3">•••• •••• •••• 4821</div>
-            <div className="flex items-center justify-between text-xs text-neutral-400">
-              <span>{fullName ? fullName.toUpperCase() : 'YOUR NAME'}</span>
-              <span className="font-mono">12/28</span>
+      <div className="relative max-w-sm mx-auto h-60">
+        {/* Gray card — back of the stack */}
+        <div className="absolute inset-x-8 top-9 h-40 rounded-[1.75rem] bg-neutral-500 rotate-6 shadow-xl" />
+        {/* Black card — middle of the stack */}
+        <div className="absolute inset-x-4 top-4 h-40 rounded-[1.75rem] bg-neutral-950 border border-neutral-800 rotate-3 shadow-xl p-5 flex flex-col justify-between">
+          <div className="flex items-start justify-end">
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-[10px] text-neutral-400">Virtual Debit</span>
+              <Wifi className="w-3.5 h-3.5 text-neutral-500 -rotate-45" />
             </div>
           </div>
+          <div className="font-mono text-xs tracking-[0.15em] text-neutral-400 text-right">•••• •••• •••• 4821</div>
         </div>
-        <span className="absolute top-4 right-4 text-[10px] font-semibold bg-white text-black px-2.5 py-1 rounded-full z-10">
+        {/* White card — front of the stack, the hero */}
+        <div className="absolute inset-x-0 top-0 h-40 rounded-[1.75rem] bg-white text-black shadow-2xl p-5 flex flex-col justify-between overflow-hidden">
+          <div className="flex items-start justify-between">
+            <span className="font-bold text-lg tracking-tight">Tranxact</span>
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-[10px] text-neutral-500">Virtual Debit</span>
+              <Wifi className="w-4 h-4 text-neutral-400 -rotate-45" />
+            </div>
+          </div>
+          <div className="font-mono text-xs tracking-[0.15em] text-neutral-700 text-right">•••• •••• •••• 4821</div>
+        </div>
+        <span className="absolute top-3 left-3 text-[10px] font-semibold bg-black text-white px-2.5 py-1 rounded-full z-20">
           Coming Soon
         </span>
       </div>
-      <p className="text-sm text-neutral-500 text-center mt-6 max-w-xs mx-auto">
-        Virtual and physical Tranxact cards are on the way.
+      <p className="text-sm text-neutral-400 text-center mt-8 max-w-xs mx-auto">
+        Your Tranxact card is on its way — clean, fast, and ready to tap wherever cards are accepted.
+      </p>
+      <p className="text-xs text-neutral-600 text-center mt-2 max-w-xs mx-auto">
+        Spend straight from your Tranxact balance. No top-up delays, no separate account — just your money, ready when you need it.
       </p>
     </div>
   );
@@ -1585,6 +1602,39 @@ function AdminScreen() {
   );
 }
 
+function AccountDetailsScreen({ onBack, profile }) {
+  const [email, setEmail] = useState('');
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setEmail(data?.user?.email || ''));
+  }, []);
+
+  const memberSince = profile?.created_at
+    ? new Date(profile.created_at).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
+    : '—';
+
+  const rows = [
+    { label: 'Full name', value: profile?.full_name || '—' },
+    { label: 'Username', value: profile?.username ? `@${profile.username}` : '—' },
+    { label: 'Email', value: email || '—' },
+    { label: 'Member since', value: memberSince },
+  ];
+
+  return (
+    <div>
+      <BackHeader title="Account Details" onBack={onBack} />
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+        {rows.map(r => (
+          <div key={r.label} className="flex items-center justify-between px-4 py-4">
+            <span className="text-sm text-neutral-500">{r.label}</span>
+            <span className="text-sm font-medium">{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function UsernameScreen({ onBack, currentUsername, onChanged }) {
   const [value, setValue] = useState(currentUsername || '');
   const [loading, setLoading] = useState(false);
@@ -1812,10 +1862,10 @@ function SupportScreen({ onBack }) {
   );
 }
 
-function ProfileScreen({ onLogout, onOpenReferrals, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings }) {
+function ProfileScreen({ onLogout, onOpenReferrals, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails }) {
   const [showVerification, setShowVerification] = useState(false);
   const items = [
-    { label: 'Account details', icon: UserCircle },
+    { label: 'Account details', icon: UserCircle, onClick: onOpenAccountDetails },
     { label: 'Username', icon: User, onClick: onOpenUsername },
     { label: 'Referrals', icon: Users, onClick: onOpenReferrals },
     { label: 'Verification', icon: ShieldCheck, badge: 'Verified', onClick: () => setShowVerification(true) },
@@ -1869,7 +1919,21 @@ function ReferralsScreen({ onBack, onEarnings, onLeaderboard, username, userId }
           <GhostButton onClick={() => { navigator.clipboard?.writeText(username || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
             {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'Copied' : 'Copy code'}
           </GhostButton>
-          <GhostButton><Share2 className="w-4 h-4" /> Share</GhostButton>
+          <GhostButton
+            onClick={async () => {
+              const link = `${window.location.origin}/?ref=${username}`;
+              if (navigator.share) {
+                try { await navigator.share({ title: 'Join me on Tranxact', text: 'Sign up on Tranxact using my referral link:', url: link }); }
+                catch { /* user cancelled share sheet, ignore */ }
+              } else {
+                navigator.clipboard?.writeText(link);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }
+            }}
+          >
+            <Share2 className="w-4 h-4" /> Share
+          </GhostButton>
         </div>
       </div>
       <div className="space-y-2">
@@ -2045,13 +2109,16 @@ export default function TranxactApp() {
   const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | forgotSent | welcome | app
   const [tab, setTab] = useState('home');
   const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | xactai
-  const [profileView, setProfileView] = useState('main'); // main | referrals | earnings | leaderboard | support | username | security | settings
+  const [profileView, setProfileView] = useState('main'); // main | referrals | earnings | leaderboard | support | username | security | settings | account
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [tpOpen, setTpOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [wallet, setWallet] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const initializedRef = React.useRef(false);
+  const referralFromUrl = React.useRef(
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('ref') : null
+  ).current;
 
   const loadUserData = async (userId) => {
     const [{ data: p }, { data: w }, { data: t }] = await Promise.all([
@@ -2083,7 +2150,7 @@ export default function TranxactApp() {
         await loadUserData(session.user.id);
         setScreen(hasSeenWelcome(session) ? 'app' : 'welcome');
       } else {
-        setScreen('login');
+        setScreen(referralFromUrl ? 'signup' : 'login');
       }
       initializedRef.current = true;
     };
@@ -2114,7 +2181,7 @@ export default function TranxactApp() {
   if (screen === 'splash') return <SplashScreen />;
 
   if (screen === 'login') return <LoginScreen onLogin={() => {}} goSignup={() => setScreen('signup')} goForgot={() => setScreen('forgot')} />;
-  if (screen === 'signup') return <SignupScreen onSignup={() => {}} goLogin={() => setScreen('login')} />;
+  if (screen === 'signup') return <SignupScreen onSignup={() => {}} goLogin={() => setScreen('login')} initialReferralCode={referralFromUrl} />;
   if (screen === 'forgot') return <ForgotScreen onSent={() => setScreen('forgotSent')} goLogin={() => setScreen('login')} />;
   if (screen === 'forgotSent') return <ForgotSentScreen goLogin={() => setScreen('login')} />;
   if (screen === 'welcome') return <WelcomeScreen onContinue={handleWelcomeContinue} />;
@@ -2170,6 +2237,7 @@ export default function TranxactApp() {
           onOpenUsername={() => setProfileView('username')}
           onOpenSecurity={() => setProfileView('security')}
           onOpenSettings={() => setProfileView('settings')}
+          onOpenAccountDetails={() => setProfileView('account')}
         />
       )}
       {tab === 'profile' && profileView === 'referrals' && (
@@ -2192,6 +2260,7 @@ export default function TranxactApp() {
         <LeaderboardScreen onBack={() => setProfileView('referrals')} myUsername={profile?.username || ''} />
       )}
       {tab === 'profile' && profileView === 'support' && <SupportScreen onBack={() => setProfileView('main')} />}
+      {tab === 'profile' && profileView === 'account' && <AccountDetailsScreen onBack={() => setProfileView('main')} profile={profile} />}
       {tab === 'profile' && profileView === 'username' && (
         <UsernameScreen
           onBack={() => setProfileView('main')}
