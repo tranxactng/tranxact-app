@@ -1922,6 +1922,7 @@ function AdminScreen() {
           {tpSuccess && (
             <p className="text-sm text-emerald-400">
               ✓ Credited {fmtNaira(tpSuccess.net_ngn)} to @{tpSuccess.target_username} via TranxactPay
+              {tpSuccess.link_closed && <span className="text-neutral-500"> — link closed (one-time payment settled)</span>}
             </p>
           )}
           <PrimaryButton onClick={handleTpSettle} disabled={tpLoading}>
