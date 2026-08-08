@@ -11,7 +11,7 @@ import {
   adminLookupUser, adminRecentSettlements, adminSettle,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference,
-  createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments
+  createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -1906,19 +1906,39 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
 }
 
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
+// ---------- Public checkout page (works for anyone, logged in or not) ----------
+const CRYPTO_NETWORK_LABEL = { BTC: 'Bitcoin network', ETH: 'Ethereum network', USDT: 'TRC20 (Tron) network', SOL: 'Solana network' };
+
 function CheckoutPage({ slug }) {
   const [link, setLink] = useState(undefined); // undefined = loading, null = not found
   const [error, setError] = useState('');
   const [flexAmount, setFlexAmount] = useState('');
-  const [payMethod, setPayMethod] = useState('bank'); // 'bank' | asset symbol
+  const [payTab, setPayTab] = useState('naira'); // naira | card | crypto
+  const [cryptoAsset, setCryptoAsset] = useState(null);
+  const [rates, setRates] = useState(null);
   const [copied, setCopied] = useState('');
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(15 * 60);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     getPublicPaymentLink(slug)
-      .then(data => setLink(data))
+      .then(data => {
+        setLink(data);
+        const first = data?.crypto_addresses ? Object.keys(data.crypto_addresses)[0] : null;
+        if (first) setCryptoAsset(first);
+      })
       .catch(e => { setError(e.message); setLink(null); });
+    supabase.rpc('get_public_rates').then(({ data }) => setRates(data || []));
   }, [slug]);
+
+  useEffect(() => {
+    const t = setInterval(() => setSecondsLeft(s => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const fmtCountdown = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   const copy = (text, key) => {
     navigator.clipboard?.writeText(text);
@@ -1926,13 +1946,34 @@ function CheckoutPage({ slug }) {
     setTimeout(() => setCopied(''), 1500);
   };
 
-  const cryptoOptions = link?.crypto_addresses ? Object.entries(link.crypto_addresses) : [];
+  const amountNgn = link?.link_type === 'fixed' ? Number(link.amount) : (parseFloat(flexAmount) || 0);
+  const rateRow = rates?.find(r => r.coin === cryptoAsset);
+  const cryptoAmount = rateRow && amountNgn > 0 ? amountNgn / Number(rateRow.effective_rate) : 0;
+  const cryptoOptions = link?.crypto_addresses ? Object.keys(link.crypto_addresses) : [];
+
+  const handleSent = async (method) => {
+    setSendError('');
+    setSending(true);
+    try {
+      const [res] = await Promise.all([
+        notifyPaymentSent({ slug, method, crypto_asset: method === 'crypto' ? cryptoAsset : undefined, claimed_amount: amountNgn || undefined }),
+        new Promise(r => setTimeout(r, 1100)), // brief, honest loading beat — not simulating a real check
+      ]);
+      setNotice(res);
+    } catch (e) {
+      setSendError(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center px-5 py-10" style={{ paddingTop: 'calc(2.5rem + env(safe-area-inset-top))' }}>
-      <div className="flex items-center gap-2 mb-10">
-        <LogoMark size={20} />
-        <span className="font-bold text-sm">Tranxact</span>
+    <div className="min-h-screen bg-black text-white flex flex-col items-center px-5 py-8" style={{ paddingTop: 'calc(2rem + env(safe-area-inset-top))' }}>
+      <div className="flex items-center justify-between w-full max-w-sm mb-8">
+        <div className="flex items-center gap-2">
+          <LogoMark size={20} />
+          <span className="font-bold text-sm">Tranxact</span>
+        </div>
       </div>
 
       {link === undefined && (
@@ -1954,69 +1995,162 @@ function CheckoutPage({ slug }) {
         </div>
       )}
 
-      {link && link.status === 'active' && (
-        <div className="w-full max-w-sm">
-          <div className="text-center mb-8">
-            <p className="text-sm text-neutral-500 mb-1">Pay @{link.creator_username}</p>
-            <h1 className="text-xl font-bold mb-1">{link.title}</h1>
-            {link.description && <p className="text-sm text-neutral-500">{link.description}</p>}
+      {link && link.status === 'active' && !notice && (
+        <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6">
+          <div className="flex items-center gap-3 pb-5 mb-5 border-b border-neutral-900">
+            <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
+              <Users className="w-4 h-4 text-violet-400" />
+            </div>
+            <div>
+              <p className="text-xs text-neutral-500">Paying</p>
+              <p className="font-semibold">@{link.creator_username}</p>
+            </div>
           </div>
 
+          <p className="text-xs text-neutral-500 mb-1.5">{link.is_tip ? 'Tip amount' : 'Amount due'}</p>
           {link.link_type === 'fixed' ? (
-            <div className="text-center mb-8">
-              <div className="font-mono text-4xl font-bold">{fmtNaira(link.amount)}</div>
-            </div>
+            <div className="font-mono text-3xl font-bold mb-5">{fmtNaira(link.amount)}</div>
           ) : (
-            <div className="mb-8">
-              <Field label={link.is_tip ? 'Tip amount (NGN)' : 'Amount (NGN)'} type="number" value={flexAmount} onChange={e => setFlexAmount(e.target.value)} placeholder="0.00" />
+            <div className="mb-5">
+              <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
+                <span className="text-neutral-500 font-mono text-xl">₦</span>
+                <input
+                  type="number"
+                  value={flexAmount}
+                  onChange={e => setFlexAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="bg-transparent outline-none font-mono text-xl font-bold w-full text-white placeholder-neutral-700"
+                />
+              </div>
             </div>
           )}
+          {link.description && <p className="text-xs text-neutral-500 mb-5 -mt-3">{link.description}</p>}
 
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-            <button onClick={() => setPayMethod('bank')} className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-medium border transition ${payMethod === 'bank' ? 'bg-white text-black border-white' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}>Bank Transfer</button>
-            {cryptoOptions.map(([symbol]) => (
-              <button key={symbol} onClick={() => setPayMethod(symbol)} className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-medium border transition ${payMethod === symbol ? 'bg-white text-black border-white' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}>{symbol}</button>
-            ))}
+          <div className="grid grid-cols-3 gap-2 mb-5">
+            <button onClick={() => setPayTab('naira')} className={`rounded-xl py-2.5 text-xs font-semibold transition ${payTab === 'naira' ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400'}`}>Pay Naira</button>
+            <button onClick={() => setPayTab('card')} className={`rounded-xl py-2.5 text-xs font-semibold transition ${payTab === 'card' ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400'}`}>Pay Card</button>
+            <button onClick={() => setPayTab('crypto')} className={`rounded-xl py-2.5 text-xs font-semibold transition ${payTab === 'crypto' ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400'}`}>Crypto</button>
           </div>
 
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
-            {payMethod === 'bank' ? (
-              <div className="space-y-3">
+          {payTab === 'naira' && (
+            <div>
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3 mb-4">
                 <div className="flex justify-between text-sm"><span className="text-neutral-500">Bank</span><span className="font-medium">Moniepoint</span></div>
-                <div className="flex justify-between text-sm"><span className="text-neutral-500">Account Number</span><span className="font-mono">6436425418</span></div>
-                <div className="flex justify-between text-sm"><span className="text-neutral-500">Account Name</span><span className="font-medium">Tranxact Technologies Ltd</span></div>
-                <div className="pt-3 border-t border-neutral-900">
+                <div className="flex justify-between text-sm items-center">
+                  <span className="text-neutral-500">Account Number</span>
+                  <button onClick={() => copy('6436425418', 'acct')} className="flex items-center gap-1.5 font-mono">
+                    6436425418 {copied === 'acct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-neutral-500" />}
+                  </button>
+                </div>
+                <div className="flex justify-between text-sm"><span className="text-neutral-500">Account Name</span><span className="font-medium text-right">Tranxact Technologies Ltd</span></div>
+                <div className="pt-3 border-t border-neutral-800">
                   <p className="text-xs text-neutral-500 mb-1.5">Use this exact reference</p>
-                  <button onClick={() => copy(link.bank_reference, 'bank')} className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5">
+                  <button onClick={() => copy(link.bank_reference, 'ref')} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5">
                     <span className="font-mono text-sm text-violet-400">{link.bank_reference}</span>
-                    {copied === 'bank' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-neutral-500" />}
+                    {copied === 'ref' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-neutral-500" />}
                   </button>
                 </div>
               </div>
-            ) : (
-              <div className="flex flex-col items-center">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link.crypto_addresses[payMethod])}`}
-                  alt={`${payMethod} address QR code`}
-                  className="w-40 h-40 rounded-xl mb-4 bg-white p-2"
-                />
-                <button onClick={() => copy(link.crypto_addresses[payMethod], payMethod)} className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5">
-                  <span className="font-mono text-xs text-neutral-300 break-all text-left">{link.crypto_addresses[payMethod]}</span>
-                  {copied === payMethod ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 ml-2" /> : <Copy className="w-4 h-4 text-neutral-500 flex-shrink-0 ml-2" />}
-                </button>
+              <div className="flex items-center justify-center gap-1.5 text-xs text-amber-400 mb-4">
+                <Loader2 className="w-3 h-3" style={{ animation: 'none' }} /> Expires in {fmtCountdown(secondsLeft)}
               </div>
-            )}
-          </div>
+              {sendError && <p className="text-sm text-red-400 mb-3 text-center">{sendError}</p>}
+              <PrimaryButton onClick={() => handleSent('bank')} disabled={sending || (link.link_type === 'flexible' && amountNgn <= 0)}>
+                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "I've sent the payment"}
+              </PrimaryButton>
+            </div>
+          )}
 
-          {!acknowledged ? (
-            <button onClick={() => setAcknowledged(true)} className="w-full mt-5 text-sm text-neutral-500 hover:text-white transition py-2">
-              I've sent my payment
-            </button>
-          ) : (
-            <p className="text-center text-sm text-emerald-400 mt-5">Thanks — this will be confirmed shortly.</p>
+          {payTab === 'card' && (
+            <div className="relative bg-neutral-900 border border-neutral-800 rounded-xl p-4 overflow-hidden">
+              <span className="absolute top-3 right-3 text-[10px] font-semibold bg-neutral-800 border border-neutral-700 text-neutral-400 px-2.5 py-1 rounded-full">Coming Soon</span>
+              <div className="flex gap-2 mb-4 opacity-40 pointer-events-none">
+                {['NGN', 'USD', 'EUR', 'GBP'].map(c => (
+                  <span key={c} className="text-xs font-medium bg-neutral-950 border border-neutral-800 rounded-full px-3 py-1.5">{c}</span>
+                ))}
+              </div>
+              <div className="space-y-2 opacity-40 pointer-events-none">
+                <div className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-600">Card number</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-600">MM/YY</div>
+                  <div className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-600">CVV</div>
+                </div>
+              </div>
+              <p className="text-xs text-neutral-500 text-center mt-4">Card payments are on the way — use Naira or Crypto for now.</p>
+            </div>
+          )}
+
+          {payTab === 'crypto' && (
+            <div>
+              {cryptoOptions.length === 0 ? (
+                <p className="text-sm text-neutral-500 text-center py-6">No crypto option available for this link yet.</p>
+              ) : (
+                <>
+                  <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+                    {cryptoOptions.map(symbol => (
+                      <button key={symbol} onClick={() => setCryptoAsset(symbol)} className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-medium border transition ${cryptoAsset === symbol ? 'bg-white text-black border-white' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}>{symbol}</button>
+                    ))}
+                  </div>
+
+                  {amountNgn > 0 && rateRow && (
+                    <div className="text-center mb-4">
+                      <div className="font-mono text-2xl font-bold">{cryptoAmount.toFixed(6)} {cryptoAsset}</div>
+                      <div className="text-xs text-neutral-500">≈ {fmtNaira(amountNgn)} · converted at today's rate</div>
+                    </div>
+                  )}
+
+                  <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2.5 mb-4 flex items-start gap-2">
+                    <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
+                    <p className="text-xs text-amber-300">Send only {cryptoAsset} on the {CRYPTO_NETWORK_LABEL[cryptoAsset] || 'correct network'} to this address. Sending any other asset may result in permanent loss.</p>
+                  </div>
+
+                  <div className="flex flex-col items-center bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(link.crypto_addresses[cryptoAsset])}`}
+                      alt={`${cryptoAsset} address QR code`}
+                      className="w-36 h-36 rounded-lg mb-3 bg-white p-2"
+                    />
+                    <button onClick={() => copy(link.crypto_addresses[cryptoAsset], 'crypto')} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5">
+                      <span className="font-mono text-xs text-neutral-300 break-all text-left">{link.crypto_addresses[cryptoAsset]}</span>
+                      {copied === 'crypto' ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 ml-2" /> : <Copy className="w-4 h-4 text-neutral-500 flex-shrink-0 ml-2" />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-center gap-1.5 text-xs text-amber-400 mb-4">
+                    Expires in {fmtCountdown(secondsLeft)}
+                  </div>
+
+                  {sendError && <p className="text-sm text-red-400 mb-3 text-center">{sendError}</p>}
+                  <PrimaryButton onClick={() => handleSent('crypto')} disabled={sending}>
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "I've sent the payment"}
+                  </PrimaryButton>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}
+
+      {notice && (
+        <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-5">
+            <Check className="w-6 h-6 text-emerald-400" />
+          </div>
+          <h2 className="text-lg font-bold mb-1">Payment noted</h2>
+          <p className="text-sm text-neutral-500 mb-1">We're confirming this and will credit @{link.creator_username} shortly.</p>
+          <p className="text-xs text-neutral-600 font-mono mt-4 mb-6">Ref: {notice.reference}</p>
+          <a href="https://tranxact.co" className="block mb-3">
+            <PrimaryButton onClick={() => {}}>Done</PrimaryButton>
+          </a>
+          <a href={`https://app.tranxact.co/?ref=${link.creator_username}`} className="block text-sm text-violet-400 hover:text-violet-300 transition py-2">
+            New here? Join Tranxact →
+          </a>
+        </div>
+      )}
+
+      <p className="text-xs text-neutral-700 mt-8 flex items-center gap-1.5">
+        <Lock className="w-3 h-3" /> Powered by Tranxact
+      </p>
     </div>
   );
 }
