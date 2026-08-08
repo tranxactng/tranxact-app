@@ -59,23 +59,50 @@ export async function getRecentTransactions(userId, limit = 20) {
 
   const { data, error } = await supabase
     .from('ledger_entries')
-    .select('amount, transaction_id, created_at, transactions(type, status, counterparty, description, crypto_asset)')
+    .select('amount, transaction_id, created_at, transactions(type, status, counterparty, description, crypto_asset, user_id)')
     .eq('wallet_id', wallet.id)
     .order('created_at', { ascending: false })
     .limit(limit);
 
   if (error) return { data: null, error };
 
-  const mapped = (data || []).map(row => ({
-    id: row.transaction_id,
-    type: row.transactions?.type,
-    status: row.transactions?.status,
-    amount_ngn: row.amount, // signed, correct from THIS wallet's perspective
-    crypto_asset: row.transactions?.crypto_asset,
-    counterparty: row.transactions?.counterparty,
-    description: row.transactions?.description,
-    created_at: row.created_at,
-  }));
+  // For a send_user transaction, transactions.counterparty always holds the
+  // RECIPIENT's username (set once, from the sender's perspective at send time).
+  // That's correct for the sender, but wrong for the recipient viewing the same
+  // row — they need to see the SENDER instead. transactions.user_id is always
+  // the person who initiated the send, so for rows where I received (amount>0),
+  // resolve the initiator's username as the real counterparty.
+  const needsSenderLookup = (data || [])
+    .filter(row => row.transactions?.type === 'send_user' && Number(row.amount) > 0 && row.transactions?.user_id)
+    .map(row => row.transactions.user_id);
+
+  let senderUsernames = {};
+  if (needsSenderLookup.length > 0) {
+    const { data: senderProfiles } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', [...new Set(needsSenderLookup)]);
+    senderUsernames = Object.fromEntries((senderProfiles || []).map(p => [p.id, p.username]));
+  }
+
+  const mapped = (data || []).map(row => {
+    const t = row.transactions;
+    const received = Number(row.amount) > 0;
+    const counterparty = (t?.type === 'send_user' && received)
+      ? senderUsernames[t.user_id] || t.counterparty
+      : t?.counterparty;
+    return {
+      id: row.transaction_id,
+      type: t?.type,
+      status: t?.status,
+      amount_ngn: row.amount, // signed, correct from THIS wallet's perspective
+      crypto_asset: t?.crypto_asset,
+      counterparty,
+      direction: received ? 'received' : 'sent',
+      description: t?.description,
+      created_at: row.created_at,
+    };
+  });
 
   return { data: mapped, error: null };
 }
@@ -301,4 +328,12 @@ export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_am
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to record payment notice');
   return data; // { success, notice_id, reference }
+}
+
+export async function adminListPaymentNotices() {
+  return callAdminFunction('admin-payment-notices', { action: 'list_payment_notices' });
+}
+
+export async function adminGetOverviewStats() {
+  return callAdminFunction('admin-overview-stats', {});
 }
