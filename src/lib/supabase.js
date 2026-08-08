@@ -289,3 +289,16 @@ export async function getMyTranxactPayments() {
     link_title: row.transactions.payment_links?.title || null,
   }));
 }
+
+// Public — no auth required, since a checkout payer often isn't signed in at all.
+// Creates a real backend record of the claim; does not confirm or settle anything.
+export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_amount }) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/notify-payment-sent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, method, crypto_asset, claimed_amount }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to record payment notice');
+  return data; // { success, notice_id, reference }
+}
