@@ -5,11 +5,11 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-export async function signUp({ email, password, username, fullName }) {
+export async function signUp({ email, password, username, fullName, referralCode }) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { username, full_name: fullName } },
+    options: { data: { username, full_name: fullName, referral_code: referralCode || null } },
   });
   return { data, error };
 }
@@ -163,4 +163,70 @@ export async function adminRecentSettlements() {
 
 export async function adminSettle(payload) {
   return callAdminFunction('admin-settle', payload);
+}
+
+export async function getReferralEarnings(userId) {
+  const { data, error } = await supabase
+    .from('referral_earnings')
+    .select('amount, status, created_at')
+    .eq('referrer_id', userId)
+    .order('created_at', { ascending: false });
+  return { data, error };
+}
+
+export async function getReferralLeaderboard(period) {
+  const { data, error } = await supabase.rpc('get_referral_leaderboard', { p_period: period });
+  return { data, error };
+}
+
+export async function withdrawReferralEarnings() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/withdraw-referral-earnings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
+  return data; // { success, transaction_id, amount }
+}
+
+export async function changeUsername(newUsername) {
+  const { error } = await supabase.rpc('change_username', { p_new_username: newUsername });
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+export async function updatePassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+export async function setTransactionPin(pin) {
+  const { error } = await supabase.rpc('set_transaction_pin', { p_pin: pin });
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+export async function verifyTransactionPin(pin) {
+  const { data, error } = await supabase.rpc('verify_transaction_pin', { p_pin: pin });
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+export async function updateSpendingLimit(limit) {
+  const { error } = await supabase.from('profiles').update({ daily_spending_limit: limit }).eq('id', (await supabase.auth.getUser()).data.user.id);
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+export async function updatePushPreference(enabled) {
+  const { error } = await supabase.from('profiles').update({ push_notifications_enabled: enabled }).eq('id', (await supabase.auth.getUser()).data.user.id);
+  if (error) throw new Error(error.message);
+  return true;
 }
