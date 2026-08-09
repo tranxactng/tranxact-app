@@ -2718,7 +2718,337 @@ function AppShell({ tab, setTab, isAdmin = false, children }) {
 }
 
 // ---------- Root ----------
-export default function TranxactApp() {
+// ---------- Web Dashboard (pay.tranxact.co) ----------
+function DashboardShell({ tab, setTab, onLogout, children }) {
+  const navItems = [
+    { key: 'overview', label: 'Overview', icon: LineChart },
+    { key: 'links', label: 'Payment Links', icon: Link2 },
+    { key: 'transactions', label: 'Transactions', icon: Wallet },
+    { key: 'withdrawals', label: 'Withdrawals', icon: ArrowUpFromLine },
+  ];
+  return (
+    <div className="min-h-screen bg-black text-white flex">
+      <aside className="w-64 border-r border-neutral-900 p-6 flex flex-col flex-shrink-0">
+        <div className="flex items-center gap-2 mb-1">
+          <LogoMark size={22} />
+          <span className="font-bold tracking-tight">Tranxact</span>
+        </div>
+        <div className="text-xs text-violet-400 mb-10">Pay Dashboard</div>
+        <nav className="space-y-1 flex-1">
+          {navItems.map(n => (
+            <button
+              key={n.key}
+              onClick={() => setTab(n.key)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition ${tab === n.key ? 'bg-neutral-900 text-white' : 'text-neutral-500 hover:text-white hover:bg-neutral-950'}`}
+            >
+              <n.icon className="w-4 h-4" />
+              {n.label}
+            </button>
+          ))}
+        </nav>
+        <button onClick={onLogout} className="flex items-center gap-2 text-red-400 text-sm px-3 py-2.5 hover:text-red-300 transition">
+          <LogOut className="w-4 h-4" /> Log out
+        </button>
+      </aside>
+      <main className="flex-1 p-10 max-w-3xl mx-auto w-full">{children}</main>
+    </div>
+  );
+}
+
+function DashboardOverview({ balance, totalReceived, paymentCount }) {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-8">Overview</h1>
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+          <div className="text-xs text-neutral-500 mb-2">Balance</div>
+          <div className="font-mono text-2xl font-bold">{fmtNaira(balance)}</div>
+        </div>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+          <div className="text-xs text-neutral-500 mb-2">Total Received</div>
+          <div className="font-mono text-2xl font-bold">{fmtNaira(totalReceived)}</div>
+        </div>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+          <div className="text-xs text-neutral-500 mb-2">Payments</div>
+          <div className="font-mono text-2xl font-bold">{paymentCount}</div>
+        </div>
+      </div>
+      <p className="text-xs text-neutral-600 mt-6">This is the same Tranxact balance as your app — spendable there immediately, withdrawable here.</p>
+    </div>
+  );
+}
+
+function DashboardLinks({ links, onCreate, creating, createError }) {
+  const [title, setTitle] = useState('');
+  const [linkType, setLinkType] = useState('fixed');
+  const [amount, setAmount] = useState('');
+  const [copied, setCopied] = useState('');
+
+  const handleSubmit = () => {
+    onCreate({ title, link_type: linkType, amount: linkType === 'fixed' ? Number(amount) : undefined });
+    setTitle('');
+    setAmount('');
+  };
+
+  const copy = (text, key) => {
+    navigator.clipboard?.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(''), 1500);
+  };
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-8">Payment Links</h1>
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-8">
+        <h2 className="text-sm font-semibold mb-4">Create a new link</h2>
+        <div className="grid grid-cols-3 gap-3 items-end">
+          <Field label="Title" value={title} onChange={e => setTitle(e.target.value)} placeholder="What's this for?" />
+          <div>
+            <span className="text-sm text-neutral-400 mb-2 block">Type</span>
+            <select value={linkType} onChange={e => setLinkType(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white">
+              <option value="fixed">Fixed</option>
+              <option value="flexible">Flexible</option>
+            </select>
+          </div>
+          {linkType === 'fixed' && <Field label="Amount (NGN)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />}
+        </div>
+        {createError && <p className="text-sm text-red-400 mt-3">{createError}</p>}
+        <PrimaryButton onClick={handleSubmit} disabled={creating || !title.trim()} className="mt-4" style={{ width: 'auto' }}>
+          {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Link'}
+        </PrimaryButton>
+      </div>
+
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
+        {links.length === 0 ? (
+          <p className="text-sm text-neutral-500 text-center py-10">No payment links yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-neutral-900 text-left text-xs text-neutral-500">
+                <th className="px-5 py-3 font-normal">Title</th>
+                <th className="px-5 py-3 font-normal">Type</th>
+                <th className="px-5 py-3 font-normal">Amount</th>
+                <th className="px-5 py-3 font-normal">Status</th>
+                <th className="px-5 py-3 font-normal">Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              {links.map(l => (
+                <tr key={l.id} className="border-b border-neutral-900 last:border-b-0">
+                  <td className="px-5 py-3">{l.title}</td>
+                  <td className="px-5 py-3 text-neutral-500 capitalize">{l.link_type}</td>
+                  <td className="px-5 py-3 font-mono">{l.link_type === 'fixed' ? fmtNaira(l.amount) : '—'}</td>
+                  <td className="px-5 py-3">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${l.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>{l.status}</span>
+                  </td>
+                  <td className="px-5 py-3">
+                    <button onClick={() => copy(`https://app.tranxact.co/pay/${l.slug}`, l.slug)} className="text-violet-400 text-xs flex items-center gap-1">
+                      {copied === l.slug ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied === l.slug ? 'Copied' : 'Copy link'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DashboardTransactions({ transactions }) {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-8">Transactions</h1>
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-5">
+        {transactions.length === 0 ? (
+          <p className="text-sm text-neutral-500 text-center py-10">No transactions yet.</p>
+        ) : (
+          transactions.map(tx => <TransactionRow key={tx.id} tx={tx} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DashboardWithdrawals({ balance, withdrawals, onRequest, requesting, requestError, requestSuccess }) {
+  const [amount, setAmount] = useState('');
+  const [bankName, setBankName] = useState(BANKS[0]);
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountName, setAccountName] = useState('');
+
+  const handleSubmit = () => {
+    onRequest({ amount: Number(amount), bank_name: bankName, account_number: accountNumber, account_name: accountName });
+  };
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-8">Withdrawals</h1>
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-8">
+        <h2 className="text-sm font-semibold mb-1">Request a withdrawal</h2>
+        <p className="text-xs text-neutral-500 mb-4">Available balance: {fmtNaira(balance)}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Amount (NGN)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+          <div>
+            <span className="text-sm text-neutral-400 mb-2 block">Bank</span>
+            <select value={bankName} onChange={e => setBankName(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white">
+              {BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+          <Field label="Account Number" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="0123456789" />
+          <Field label="Account Name" value={accountName} onChange={e => setAccountName(e.target.value)} placeholder="As it appears on your bank account" />
+        </div>
+        {requestError && <p className="text-sm text-red-400 mt-3">{requestError}</p>}
+        {requestSuccess && <p className="text-sm text-emerald-400 mt-3">✓ Withdrawal request submitted — you'll be paid once it's processed.</p>}
+        <PrimaryButton onClick={handleSubmit} disabled={requesting || !amount || !accountNumber || !accountName} className="mt-4" style={{ width: 'auto' }}>
+          {requesting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Request Withdrawal'}
+        </PrimaryButton>
+      </div>
+
+      <h2 className="text-sm font-semibold mb-3">History</h2>
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+        {withdrawals.length === 0 ? (
+          <p className="text-sm text-neutral-500 text-center py-10">No withdrawal requests yet.</p>
+        ) : (
+          withdrawals.map(w => (
+            <div key={w.id} className="flex items-center justify-between px-5 py-4">
+              <div>
+                <div className="text-sm font-medium">{fmtNaira(w.amount)}</div>
+                <div className="text-xs text-neutral-500">{w.bank_name} · {w.account_number}</div>
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${w.status === 'paid' ? 'bg-emerald-500/15 text-emerald-400' : w.status === 'rejected' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>{w.status}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WebDashboardApp() {
+  const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | app
+  const [tab, setTab] = useState('overview');
+  const [balance, setBalance] = useState(0);
+  const [links, setLinks] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [payments, setPayments] = useState([]);
+
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [requesting, setRequesting] = useState(false);
+  const [requestError, setRequestError] = useState('');
+  const [requestSuccess, setRequestSuccess] = useState(false);
+
+  const loadAll = async (userId) => {
+    const { data: wallet } = await getWallet(userId);
+    setBalance(wallet?.balance || 0);
+    try { setLinks(await getMyPaymentLinks()); } catch { setLinks([]); }
+    const { data: txs } = await getRecentTransactions(userId, 50);
+    setTransactions(txs || []);
+    try { setPayments(await getMyTranxactPayments()); } catch { setPayments([]); }
+    try { setWithdrawals(await getMyWithdrawals()); } catch { setWithdrawals([]); }
+  };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        loadAll(session.user.id).then(() => setScreen('app'));
+      } else {
+        setScreen('login');
+      }
+    });
+  }, []);
+
+  const handleAuthed = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await loadAll(session.user.id);
+      setScreen('app');
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut();
+    setScreen('login');
+  };
+
+  const handleCreateLink = async (payload) => {
+    setCreateError('');
+    setCreating(true);
+    try {
+      await createPaymentLink(payload);
+      setLinks(await getMyPaymentLinks());
+    } catch (e) {
+      setCreateError(e.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleRequestWithdrawal = async (payload) => {
+    setRequestError('');
+    setRequestSuccess(false);
+    setRequesting(true);
+    try {
+      await requestWithdrawal(payload);
+      setRequestSuccess(true);
+      setWithdrawals(await getMyWithdrawals());
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data: wallet } = await getWallet(session.user.id);
+      setBalance(wallet?.balance || 0);
+    } catch (e) {
+      setRequestError(e.message);
+    } finally {
+      setRequesting(false);
+    }
+  };
+
+  const totalReceived = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+
+  if (screen === 'splash') {
+    return <div className="min-h-screen bg-black flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
+  }
+
+  if (screen === 'login' || screen === 'signup' || screen === 'forgot') {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center px-5 py-10">
+        <div className="w-full max-w-sm">
+          <div className="flex items-center gap-2 justify-center mb-8">
+            <LogoMark size={22} />
+            <div className="text-center">
+              <div className="font-bold">Tranxact</div>
+              <div className="text-xs text-violet-400">Pay Dashboard</div>
+            </div>
+          </div>
+          {screen === 'login' && <LoginScreen onLogin={handleAuthed} goSignup={() => setScreen('signup')} goForgot={() => setScreen('forgot')} />}
+          {screen === 'signup' && <SignupScreen onSignup={handleAuthed} goLogin={() => setScreen('login')} />}
+          {screen === 'forgot' && <ForgotScreen onSent={() => setScreen('login')} goLogin={() => setScreen('login')} />}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <DashboardShell tab={tab} setTab={setTab} onLogout={handleLogout}>
+      {tab === 'overview' && <DashboardOverview balance={balance} totalReceived={totalReceived} paymentCount={payments.length} />}
+      {tab === 'links' && <DashboardLinks links={links} onCreate={handleCreateLink} creating={creating} createError={createError} />}
+      {tab === 'transactions' && <DashboardTransactions transactions={transactions} />}
+      {tab === 'withdrawals' && (
+        <DashboardWithdrawals
+          balance={balance}
+          withdrawals={withdrawals}
+          onRequest={handleRequestWithdrawal}
+          requesting={requesting}
+          requestError={requestError}
+          requestSuccess={requestSuccess}
+        />
+      )}
+    </DashboardShell>
+  );
+}
+
+function MobileAppRoot() {
   const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | forgotSent | welcome | app
   const [tab, setTab] = useState('home');
   const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | xactai
@@ -2899,4 +3229,13 @@ export default function TranxactApp() {
       {tpOpen && <TranxactPayScreen onClose={() => setTpOpen(false)} username={profile?.username || ''} />}
     </AppShell>
   );
+}
+
+// The single real entry point. Decides which experience to render based on
+// which domain someone's actually on \u2014 same codebase, same auth, same data,
+// just a different front door. pay.tranxact.co gets the merchant dashboard;
+// everything else gets the normal mobile-first app.
+export default function TranxactApp() {
+  const isPayDashboard = typeof window !== 'undefined' && window.location.hostname.startsWith('pay.');
+  return isPayDashboard ? <WebDashboardApp /> : <MobileAppRoot />;
 }
