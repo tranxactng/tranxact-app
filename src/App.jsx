@@ -3,7 +3,7 @@ import {
   Eye, EyeOff, Bell, ArrowDownToLine, ArrowUpFromLine, Link2, Smartphone, Wifi, Zap, Tv,
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
-  UserCircle, Users, Landmark, Loader2, Sparkles
+  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -12,7 +12,7 @@ import {
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
-  requestWithdrawal, getMyWithdrawals
+  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -178,14 +178,15 @@ function LogoMark({ size = 26 }) {
 }
 
 // ---------- Auth screens ----------
-function AuthShell({ children, title, subtitle }) {
+function AuthShell({ children, title, subtitle, brandLabel = 'Tranxact', tagline }) {
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-6" style={{ paddingTop: 'calc(3rem + env(safe-area-inset-top))', paddingBottom: 'calc(3rem + env(safe-area-inset-bottom))' }}>
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2 mb-10 justify-center">
+        <div className={`flex items-center gap-2 justify-center ${tagline ? 'mb-1' : 'mb-10'}`}>
           <LogoMark size={24} />
-          <span className="font-bold text-lg tracking-tight">Tranxact</span>
+          <span className="font-bold text-lg tracking-tight">{brandLabel}</span>
         </div>
+        {tagline && <p className="text-xs text-violet-400 text-center mb-10">{tagline}</p>}
         <h1 className="text-2xl font-bold tracking-tight mb-1">{title}</h1>
         <p className="text-neutral-400 text-sm mb-8">{subtitle}</p>
         {children}
@@ -227,7 +228,7 @@ function WelcomeScreen({ onContinue }) {
   );
 }
 
-function LoginScreen({ onLogin, goSignup, goForgot }) {
+function LoginScreen({ onLogin, goSignup, goForgot, isDashboard }) {
   const [showPw, setShowPw] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -245,7 +246,7 @@ function LoginScreen({ onLogin, goSignup, goForgot }) {
   };
 
   return (
-    <AuthShell title="Welcome back" subtitle="Log in to continue to your wallet.">
+    <AuthShell title="Welcome back" subtitle="Log in to continue to your wallet." brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" required value={email} onChange={e => setEmail(e.target.value)} />
         <label className="block">
@@ -283,13 +284,14 @@ function LoginScreen({ onLogin, goSignup, goForgot }) {
   );
 }
 
-function SignupScreen({ onSignup, goLogin, initialReferralCode }) {
+function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   const [showPw, setShowPw] = useState(false);
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [referralCode, setReferralCode] = useState(initialReferralCode || '');
+  const [businessName, setBusinessName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
@@ -300,7 +302,7 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode }) {
     setLoading(true);
     const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
     const cleanReferral = referralCode.trim().toLowerCase().replace(/^@/, '');
-    const { data, error: err } = await signUp({ email, password, username: cleanUsername, fullName, referralCode: cleanReferral || null });
+    const { data, error: err } = await signUp({ email, password, username: cleanUsername, fullName, referralCode: cleanReferral || null, businessName: isDashboard ? (businessName.trim() || null) : null });
     setLoading(false);
     if (err) { setError(err.message); return; }
     if (!data.session) { setNeedsConfirmation(true); return; }
@@ -309,7 +311,7 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode }) {
 
   if (needsConfirmation) {
     return (
-      <AuthShell title="Check your email" subtitle="">
+      <AuthShell title="Check your email" subtitle="" brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
         <p className="text-neutral-400 text-sm mb-8">
           We've sent a confirmation link to {email}. Verify your email, then log in.
         </p>
@@ -319,7 +321,7 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode }) {
   }
 
   return (
-    <AuthShell title="Create your account" subtitle="Money, simplified — set up your wallet in a minute.">
+    <AuthShell title="Create your account" subtitle="Money, simplified — set up your wallet in a minute." brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <Field label="Full name" icon={User} type="text" placeholder="David Adeyemi" required value={fullName} onChange={e => setFullName(e.target.value)} />
         <Field label="Username" icon={User} type="text" placeholder="david" required value={username} onChange={e => setUsername(e.target.value)} />
@@ -343,7 +345,12 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode }) {
           </div>
         </label>
         <div>
-          <Field label="Referral code (optional)" icon={Users} type="text" placeholder="username of whoever referred you" value={referralCode} onChange={e => setReferralCode(e.target.value)} />
+          {isDashboard && (
+            <Field label="What are you accepting payments for?" icon={Landmark} type="text" placeholder="e.g. event tickets, consulting, product sales" value={businessName} onChange={e => setBusinessName(e.target.value)} />
+          )}
+          {!isDashboard && (
+            <Field label="Referral code (optional)" icon={Users} type="text" placeholder="username of whoever referred you" value={referralCode} onChange={e => setReferralCode(e.target.value)} />
+          )}
           {initialReferralCode && referralCode === initialReferralCode && (
             <p className="text-xs text-emerald-400 mt-1.5">Applied from your referral link</p>
           )}
@@ -361,7 +368,7 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode }) {
   );
 }
 
-function ForgotScreen({ onSent, goLogin }) {
+function ForgotScreen({ onSent, goLogin, isDashboard }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -377,7 +384,7 @@ function ForgotScreen({ onSent, goLogin }) {
   };
 
   return (
-    <AuthShell title="Reset your password" subtitle="Enter the email on your account and we'll send a reset link.">
+    <AuthShell title="Reset your password" subtitle="Enter the email on your account and we'll send a reset link." brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" required value={email} onChange={e => setEmail(e.target.value)} />
         {error && <p className="text-sm text-red-400">{error}</p>}
@@ -2723,12 +2730,31 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
   const navItems = [
     { key: 'overview', label: 'Overview', icon: LineChart },
     { key: 'links', label: 'Payment Links', icon: Link2 },
+    { key: 'analytics', label: 'Analytics', icon: BarChart3 },
     { key: 'transactions', label: 'Transactions', icon: Wallet },
     { key: 'withdrawals', label: 'Withdrawals', icon: ArrowUpFromLine },
   ];
   return (
-    <div className="min-h-screen bg-black text-white flex">
-      <aside className="w-64 border-r border-neutral-900 p-6 flex flex-col flex-shrink-0">
+    <div className="min-h-screen bg-black text-white flex flex-col md:flex-row">
+      {/* Mobile top bar */}
+      <div
+        className="md:hidden flex items-center justify-between px-5 border-b border-neutral-900 flex-shrink-0"
+        style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))', paddingBottom: '1rem' }}
+      >
+        <div className="flex items-center gap-2">
+          <LogoMark size={20} />
+          <div>
+            <div className="font-bold text-sm leading-tight">Tranxact</div>
+            <div className="text-[10px] text-violet-400 leading-tight">Pay Dashboard</div>
+          </div>
+        </div>
+        <button onClick={onLogout} className="text-red-400">
+          <LogOut className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex w-64 border-r border-neutral-900 p-6 flex-col flex-shrink-0">
         <div className="flex items-center gap-2 mb-1">
           <LogoMark size={22} />
           <span className="font-bold tracking-tight">Tranxact</span>
@@ -2750,7 +2776,22 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
           <LogOut className="w-4 h-4" /> Log out
         </button>
       </aside>
-      <main className="flex-1 p-10 max-w-3xl mx-auto w-full">{children}</main>
+
+      {/* Mobile bottom nav */}
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur-md border-t border-neutral-900 flex justify-around py-2.5 z-40"
+        style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}
+      >
+        {navItems.map(n => (
+          <button key={n.key} onClick={() => setTab(n.key)} className="flex flex-col items-center gap-1 px-3 py-1">
+            <n.icon className={`w-5 h-5 ${tab === n.key ? 'text-white' : 'text-neutral-600'}`} />
+            <span className={`text-[10px] ${tab === n.key ? 'text-white' : 'text-neutral-600'}`}>{n.label}</span>
+            {tab === n.key && <span className="w-1 h-1 rounded-full bg-white mt-0.5" />}
+          </button>
+        ))}
+      </nav>
+
+      <main className="flex-1 p-5 md:p-10 pb-24 md:pb-10 max-w-3xl mx-auto w-full">{children}</main>
     </div>
   );
 }
@@ -2758,8 +2799,9 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
 function DashboardOverview({ balance, totalReceived, paymentCount }) {
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-8">Overview</h1>
-      <div className="grid grid-cols-3 gap-4">
+      <h1 className="text-2xl font-bold mb-1">Overview</h1>
+      <p className="text-sm text-neutral-500 mb-8">Tranxact Pay is the infrastructure layer for how your business gets paid \u2014 links, tracking, and payouts, all in one place.</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
           <div className="text-xs text-neutral-500 mb-2">Balance</div>
           <div className="font-mono text-2xl font-bold">{fmtNaira(balance)}</div>
@@ -2773,7 +2815,18 @@ function DashboardOverview({ balance, totalReceived, paymentCount }) {
           <div className="font-mono text-2xl font-bold">{paymentCount}</div>
         </div>
       </div>
-      <p className="text-xs text-neutral-600 mt-6">This is the same Tranxact balance as your app — spendable there immediately, withdrawable here.</p>
+      <p className="text-xs text-neutral-600 mt-6">This is the same Tranxact balance as your app \u2014 spendable there immediately, withdrawable here.</p>
+
+      <div className="relative bg-neutral-950 border border-violet-500/25 rounded-2xl p-6 mt-8 overflow-hidden">
+        <span className="absolute top-5 right-5 text-[10px] font-semibold bg-neutral-900 border border-neutral-800 text-neutral-400 px-2.5 py-1 rounded-full">Coming Soon</span>
+        <div className="flex items-center gap-2 mb-2">
+          <Link2 className="w-4 h-4 text-violet-400" />
+          <h2 className="text-sm font-semibold text-violet-300">Pay with Tranxact</h2>
+        </div>
+        <p className="text-sm text-neutral-400 max-w-md">
+          A checkout button for your own website or app \u2014 let your customers pay directly with Tranxact, without ever leaving your product. Same rates, same tracking, same balance as everything else here.
+        </p>
+      </div>
     </div>
   );
 }
@@ -2782,12 +2835,47 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
   const [title, setTitle] = useState('');
   const [linkType, setLinkType] = useState('fixed');
   const [amount, setAmount] = useState('');
+  const [serviceType, setServiceType] = useState('product');
+  const [expectedPeople, setExpectedPeople] = useState('');
+  const [hasExpiry, setHasExpiry] = useState(false);
+  const [expiryDate, setExpiryDate] = useState('');
   const [copied, setCopied] = useState('');
 
+  const [showSales, setShowSales] = useState(false);
+  const [salesName, setSalesName] = useState('');
+  const [salesEmail, setSalesEmail] = useState('');
+  const [salesMessage, setSalesMessage] = useState('');
+  const [salesSending, setSalesSending] = useState(false);
+  const [salesSent, setSalesSent] = useState(false);
+  const [salesError, setSalesError] = useState('');
+
   const handleSubmit = () => {
-    onCreate({ title, link_type: linkType, amount: linkType === 'fixed' ? Number(amount) : undefined });
+    onCreate({
+      title,
+      link_type: linkType,
+      amount: linkType === 'fixed' ? Number(amount) : undefined,
+      service_type: serviceType,
+      expected_people: expectedPeople ? Number(expectedPeople) : undefined,
+      expiry_date: hasExpiry && expiryDate ? new Date(expiryDate).toISOString() : undefined,
+    });
     setTitle('');
     setAmount('');
+    setExpectedPeople('');
+    setHasExpiry(false);
+    setExpiryDate('');
+  };
+
+  const handleSalesSubmit = async () => {
+    setSalesError('');
+    setSalesSending(true);
+    try {
+      await submitSalesLead({ name: salesName, email: salesEmail, message: salesMessage });
+      setSalesSent(true);
+    } catch (e) {
+      setSalesError(e.message);
+    } finally {
+      setSalesSending(false);
+    }
   };
 
   const copy = (text, key) => {
@@ -2798,47 +2886,103 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-8">Payment Links</h1>
+      <h1 className="text-2xl font-bold mb-2">Payment Links</h1>
+      <p className="text-sm text-neutral-500 mb-8">The core of how you get paid on Tranxact \u2014 tell us what it's for, and we'll set up the right checkout for it.</p>
+
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-8">
         <h2 className="text-sm font-semibold mb-4">Create a new link</h2>
-        <div className="grid grid-cols-3 gap-3 items-end">
+        <div className="space-y-4">
           <Field label="Title" value={title} onChange={e => setTitle(e.target.value)} placeholder="What's this for?" />
+
           <div>
-            <span className="text-sm text-neutral-400 mb-2 block">Type</span>
-            <select value={linkType} onChange={e => setLinkType(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white">
-              <option value="fixed">Fixed</option>
-              <option value="flexible">Flexible</option>
+            <span className="text-sm text-neutral-400 mb-2 block">What type of service is this?</span>
+            <select value={serviceType} onChange={e => setServiceType(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white">
+              <option value="product">Product sale</option>
+              <option value="service">Service / consulting</option>
+              <option value="event">Event or ticketing</option>
+              <option value="subscription">Subscription / recurring</option>
+              <option value="other">Other</option>
             </select>
           </div>
-          {linkType === 'fixed' && <Field label="Amount (NGN)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <span className="text-sm text-neutral-400 mb-2 block">Amount type</span>
+              <select value={linkType} onChange={e => setLinkType(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white">
+                <option value="fixed">Fixed amount</option>
+                <option value="flexible">Flexible amount</option>
+              </select>
+            </div>
+            {linkType === 'fixed' && <Field label="Amount (NGN)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />}
+          </div>
+
+          {serviceType === 'event' && (
+            <Field label="Expected number of people (optional)" type="number" value={expectedPeople} onChange={e => setExpectedPeople(e.target.value)} placeholder="e.g. 50" />
+          )}
+
+          <div>
+            <label className="flex items-center gap-2 text-sm text-neutral-400 mb-2">
+              <input type="checkbox" checked={hasExpiry} onChange={e => setHasExpiry(e.target.checked)} className="accent-violet-500" />
+              This link should stop accepting payments after a certain date (e.g. until an event ends)
+            </label>
+            {hasExpiry && (
+              <input
+                type="date"
+                value={expiryDate}
+                onChange={e => setExpiryDate(e.target.value)}
+                className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white"
+              />
+            )}
+          </div>
+
+          {createError && <p className="text-sm text-red-400">{createError}</p>}
+          <PrimaryButton onClick={handleSubmit} disabled={creating || !title.trim()} style={{ width: 'auto' }}>
+            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Link'}
+          </PrimaryButton>
         </div>
-        {createError && <p className="text-sm text-red-400 mt-3">{createError}</p>}
-        <PrimaryButton onClick={handleSubmit} disabled={creating || !title.trim()} className="mt-4" style={{ width: 'auto' }}>
-          {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Link'}
-        </PrimaryButton>
+
+        <div className="mt-5 pt-5 border-t border-neutral-900">
+          <p className="text-xs text-neutral-500 mb-2">Need something more custom \u2014 recurring billing, high volume, a dedicated setup?</p>
+          {!showSales ? (
+            <button onClick={() => setShowSales(true)} className="text-sm text-violet-400 hover:text-violet-300 transition">Talk to Sales \u2192</button>
+          ) : salesSent ? (
+            <p className="text-sm text-emerald-400">\u2713 Thanks \u2014 we'll be in touch shortly.</p>
+          ) : (
+            <div className="space-y-3 mt-3">
+              <Field label="Your name" value={salesName} onChange={e => setSalesName(e.target.value)} placeholder="Full name" />
+              <Field label="Email" type="email" value={salesEmail} onChange={e => setSalesEmail(e.target.value)} placeholder="you@example.com" />
+              <Field label="Tell us what you need" value={salesMessage} onChange={e => setSalesMessage(e.target.value)} placeholder="A short description" />
+              {salesError && <p className="text-sm text-red-400">{salesError}</p>}
+              <PrimaryButton onClick={handleSalesSubmit} disabled={salesSending || !salesName.trim() || !salesEmail.trim()} style={{ width: 'auto' }}>
+                {salesSending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send'}
+              </PrimaryButton>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
         {links.length === 0 ? (
           <p className="text-sm text-neutral-500 text-center py-10">No payment links yet.</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-900 text-left text-xs text-neutral-500">
-                <th className="px-5 py-3 font-normal">Title</th>
-                <th className="px-5 py-3 font-normal">Type</th>
-                <th className="px-5 py-3 font-normal">Amount</th>
-                <th className="px-5 py-3 font-normal">Status</th>
-                <th className="px-5 py-3 font-normal">Link</th>
-              </tr>
-            </thead>
-            <tbody>
-              {links.map(l => (
-                <tr key={l.id} className="border-b border-neutral-900 last:border-b-0">
-                  <td className="px-5 py-3">{l.title}</td>
-                  <td className="px-5 py-3 text-neutral-500 capitalize">{l.link_type}</td>
-                  <td className="px-5 py-3 font-mono">{l.link_type === 'fixed' ? fmtNaira(l.amount) : '—'}</td>
-                  <td className="px-5 py-3">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-neutral-900 text-left text-xs text-neutral-500">
+                  <th className="px-5 py-3 font-normal">Title</th>
+                  <th className="px-5 py-3 font-normal">Type</th>
+                  <th className="px-5 py-3 font-normal">Amount</th>
+                  <th className="px-5 py-3 font-normal">Status</th>
+                  <th className="px-5 py-3 font-normal">Link</th>
+                </tr>
+              </thead>
+              <tbody>
+                {links.map(l => (
+                  <tr key={l.id} className="border-b border-neutral-900 last:border-b-0">
+                    <td className="px-5 py-3 whitespace-nowrap">{l.title}</td>
+                    <td className="px-5 py-3 text-neutral-500 capitalize whitespace-nowrap">{l.link_type}</td>
+                    <td className="px-5 py-3 font-mono whitespace-nowrap">{l.link_type === 'fixed' ? fmtNaira(l.amount) : '\u2014'}</td>
+                    <td className="px-5 py-3 whitespace-nowrap">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${l.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>{l.status}</span>
                   </td>
                   <td className="px-5 py-3">
@@ -2850,7 +2994,74 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DashboardAnalytics({ analytics }) {
+  if (!analytics) {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-8">Analytics</h1>
+        <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>
+      </div>
+    );
+  }
+
+  const StatCard = ({ label, value, sub }) => (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+      <div className="text-xs text-neutral-500 mb-2">{label}</div>
+      <div className="font-mono text-2xl font-bold">{value}</div>
+      {sub && <div className="text-xs text-neutral-600 mt-1">{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-2">Analytics</h1>
+      <p className="text-sm text-neutral-500 mb-8">Real numbers on how your payment links are actually performing.</p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+        <StatCard label="Total Links Created" value={analytics.total_links} />
+        <StatCard label="Total Payments" value={analytics.total_payments} />
+        <StatCard label="Total Volume" value={fmtNaira(analytics.total_volume)} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <StatCard
+          label="Acceptance Rate"
+          value={`${analytics.acceptance_rate_pct}%`}
+          sub={`${analytics.links_with_payment} of ${analytics.total_links} links have received a payment`}
+        />
+        <StatCard label="Average Payment" value={fmtNaira(analytics.avg_payment)} />
+        <StatCard label="Active Links" value={`${analytics.active_links} active \u00b7 ${analytics.closed_links} closed`} />
+      </div>
+
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+        <h2 className="text-sm font-semibold mb-4">Link type breakdown</h2>
+        <div className="space-y-3">
+          <div>
+            <div className="flex justify-between text-xs text-neutral-500 mb-1.5">
+              <span>Fixed amount</span>
+              <span>{analytics.fixed_links} ({analytics.fixed_pct}%)</span>
+            </div>
+            <div className="h-2 bg-neutral-900 rounded-full overflow-hidden">
+              <div className="h-full bg-violet-500" style={{ width: `${analytics.fixed_pct}%` }} />
+            </div>
+          </div>
+          <div>
+            <div className="flex justify-between text-xs text-neutral-500 mb-1.5">
+              <span>Flexible amount</span>
+              <span>{analytics.flexible_links} ({analytics.flexible_pct}%)</span>
+            </div>
+            <div className="h-2 bg-neutral-900 rounded-full overflow-hidden">
+              <div className="h-full bg-teal-500" style={{ width: `${analytics.flexible_pct}%` }} />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -2887,7 +3098,7 @@ function DashboardWithdrawals({ balance, withdrawals, onRequest, requesting, req
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-8">
         <h2 className="text-sm font-semibold mb-1">Request a withdrawal</h2>
         <p className="text-xs text-neutral-500 mb-4">Available balance: {fmtNaira(balance)}</p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Amount (NGN)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
           <div>
             <span className="text-sm text-neutral-400 mb-2 block">Bank</span>
@@ -2932,6 +3143,7 @@ function WebDashboardApp() {
   const [links, setLinks] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
   const [payments, setPayments] = useState([]);
 
   const [creating, setCreating] = useState(false);
@@ -2948,6 +3160,7 @@ function WebDashboardApp() {
     setTransactions(txs || []);
     try { setPayments(await getMyTranxactPayments()); } catch { setPayments([]); }
     try { setWithdrawals(await getMyWithdrawals()); } catch { setWithdrawals([]); }
+    try { setAnalytics(await getDashboardAnalytics()); } catch { setAnalytics(null); }
   };
 
   useEffect(() => {
@@ -3012,20 +3225,11 @@ function WebDashboardApp() {
 
   if (screen === 'login' || screen === 'signup' || screen === 'forgot') {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center px-5 py-10">
-        <div className="w-full max-w-sm">
-          <div className="flex items-center gap-2 justify-center mb-8">
-            <LogoMark size={22} />
-            <div className="text-center">
-              <div className="font-bold">Tranxact</div>
-              <div className="text-xs text-violet-400">Pay Dashboard</div>
-            </div>
-          </div>
-          {screen === 'login' && <LoginScreen onLogin={handleAuthed} goSignup={() => setScreen('signup')} goForgot={() => setScreen('forgot')} />}
-          {screen === 'signup' && <SignupScreen onSignup={handleAuthed} goLogin={() => setScreen('login')} />}
-          {screen === 'forgot' && <ForgotScreen onSent={() => setScreen('login')} goLogin={() => setScreen('login')} />}
-        </div>
-      </div>
+      <>
+        {screen === 'login' && <LoginScreen onLogin={handleAuthed} goSignup={() => setScreen('signup')} goForgot={() => setScreen('forgot')} isDashboard />}
+        {screen === 'signup' && <SignupScreen onSignup={handleAuthed} goLogin={() => setScreen('login')} isDashboard />}
+        {screen === 'forgot' && <ForgotScreen onSent={() => setScreen('login')} goLogin={() => setScreen('login')} isDashboard />}
+      </>
     );
   }
 
@@ -3033,6 +3237,7 @@ function WebDashboardApp() {
     <DashboardShell tab={tab} setTab={setTab} onLogout={handleLogout}>
       {tab === 'overview' && <DashboardOverview balance={balance} totalReceived={totalReceived} paymentCount={payments.length} />}
       {tab === 'links' && <DashboardLinks links={links} onCreate={handleCreateLink} creating={creating} createError={createError} />}
+      {tab === 'analytics' && <DashboardAnalytics analytics={analytics} />}
       {tab === 'transactions' && <DashboardTransactions transactions={transactions} />}
       {tab === 'withdrawals' && (
         <DashboardWithdrawals
