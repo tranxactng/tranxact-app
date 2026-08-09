@@ -1920,10 +1920,16 @@ function AdminScreen() {
           )}
           {tpError && <p className="text-sm text-red-400">{tpError}</p>}
           {tpSuccess && (
-            <p className="text-sm text-emerald-400">
-              ✓ Credited {fmtNaira(tpSuccess.net_ngn)} to @{tpSuccess.target_username} via TranxactPay
-              {tpSuccess.link_closed && <span className="text-neutral-500"> — link closed (one-time payment settled)</span>}
-            </p>
+            <div className="text-sm text-emerald-400">
+              <p>✓ Credited {fmtNaira(tpSuccess.net_ngn)} to @{tpSuccess.target_username} via TranxactPay</p>
+              {tpSuccess.fee_ngn > 0 && (
+                <p className="text-xs text-neutral-500 mt-1">
+                  Fee: {fmtNaira(tpSuccess.fee_ngn)}
+                  {tpSuccess.flat_fee_ngn > 0 && ` (${fmtNaira(tpSuccess.percent_fee_ngn)} + ${fmtNaira(tpSuccess.flat_fee_ngn)} flat)`}
+                </p>
+              )}
+              {tpSuccess.link_closed && <p className="text-xs text-neutral-500">Link closed — one-time payment settled</p>}
+            </div>
           )}
           <PrimaryButton onClick={handleTpSettle} disabled={tpLoading}>
             {tpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Settle Payment'}
