@@ -5,11 +5,11 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-export async function signUp({ email, password, username, fullName, referralCode }) {
+export async function signUp({ email, password, username, fullName, referralCode, businessName }) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { username, full_name: fullName, referral_code: referralCode || null } },
+    options: { data: { username, full_name: fullName, referral_code: referralCode || null, business_name: businessName || null } },
   });
   return { data, error };
 }
@@ -258,7 +258,7 @@ export async function updatePushPreference(enabled) {
   return true;
 }
 
-export async function createPaymentLink({ title, description, link_type, amount, is_tip }) {
+export async function createPaymentLink({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date }) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
 
@@ -268,11 +268,43 @@ export async function createPaymentLink({ title, description, link_type, amount,
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ title, description, link_type, amount, is_tip }),
+    body: JSON.stringify({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to create payment link');
   return data; // { success, id, slug, url }
+}
+
+export async function submitSalesLead({ name, email, message }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers = { 'Content-Type': 'application/json' };
+  if (session) headers.Authorization = `Bearer ${session.access_token}`;
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/submit-sales-lead`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name, email, message }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to submit');
+  return data;
+}
+
+export async function getDashboardAnalytics() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/dashboard-analytics`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: '{}',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load analytics');
+  return data;
 }
 
 export async function getMyPaymentLinks() {
