@@ -398,3 +398,22 @@ export async function getMyWithdrawals() {
   if (error) throw new Error(error.message);
   return data || [];
 }
+
+// Fire-and-forget: notifies admin that a user copied their receive info.
+// Never throws — a notification failing should never block the actual copy action.
+export async function notifyCopyEvent({ type, asset }) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch(`${SUPABASE_URL}/functions/v1/notify-copy-event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ type, asset }),
+    });
+  } catch {
+    // silent — this is a best-effort notification, not a user-facing action
+  }
+}
