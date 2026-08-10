@@ -2191,6 +2191,11 @@ function CheckoutPage({ slug }) {
   const [sendError, setSendError] = useState('');
   const [notice, setNotice] = useState(null);
 
+  // A number typed while on one tab means a different currency on another —
+  // reset on switch so it's never misread (e.g. a naira figure silently
+  // treated as dollars after tapping into Crypto).
+  useEffect(() => { setFlexAmount(''); }, [payTab]);
+
   useEffect(() => {
     getPublicPaymentLink(slug)
       .then(data => {
@@ -2215,12 +2220,22 @@ function CheckoutPage({ slug }) {
     setTimeout(() => setCopied(''), 1500);
   };
 
-  const amountNgn = link?.link_type === 'fixed' ? Number(link.amount) : (parseFloat(flexAmount) || 0);
+  // For a flexible link, what the payer typed means something different
+  // depending on which tab they're on: naira/card is NGN, crypto is a direct
+  // USD entry (not a naira figure that then gets converted). Switching tabs
+  // resets the field so a number typed in one currency can never be
+  // misread as the other.
+  const flexIsUsd = payTab === 'crypto';
+  const amountNgn = link?.link_type === 'fixed'
+    ? Number(link.amount)
+    : (flexIsUsd ? 0 : (parseFloat(flexAmount) || 0));
   const rateRow = rates?.find(r => r.coin === cryptoAsset);
   // effective_rate is ₦ per $1, so this division gives the USD value — NOT a
   // crypto quantity. The actual coin amount needs a further division by that
   // coin's own USD market price.
-  const usdAmount = rateRow && amountNgn > 0 ? amountNgn / Number(rateRow.effective_rate) : 0;
+  const usdAmount = flexIsUsd
+    ? (parseFloat(flexAmount) || 0)
+    : (rateRow && amountNgn > 0 ? amountNgn / Number(rateRow.effective_rate) : 0);
   const cryptoAmount = rateRow && rateRow.usd_market_price > 0 ? usdAmount / Number(rateRow.usd_market_price) : 0;
   const cryptoOptions = link?.crypto_addresses ? Object.keys(link.crypto_addresses) : [];
 
@@ -2275,18 +2290,18 @@ function CheckoutPage({ slug }) {
               <Users className="w-4 h-4 text-violet-400" />
             </div>
             <div>
-              <p className="text-xs text-neutral-500">Paying</p>
+              <p className="text-xs text-neutral-500">{link.is_tip ? 'Tipping' : 'Paying'}</p>
               <p className="font-semibold">@{link.creator_username}</p>
             </div>
           </div>
 
-          <p className="text-xs text-neutral-500 mb-1.5">{link.is_tip ? 'Tip amount' : 'Amount due'}</p>
+          <p className="text-xs text-neutral-500 mb-1.5">{link.is_tip ? 'Tip amount' : 'Amount due'}{link.link_type === 'flexible' ? (flexIsUsd ? ' (USD)' : ' (NGN)') : ''}</p>
           {link.link_type === 'fixed' ? (
             <div className="font-mono text-3xl font-bold mb-5">{fmtNaira(link.amount)}</div>
           ) : (
             <div className="mb-5">
               <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
-                <span className="text-neutral-500 font-mono text-xl">₦</span>
+                <span className="text-neutral-500 font-mono text-xl">{flexIsUsd ? '$' : '₦'}</span>
                 <input
                   type="number"
                   value={flexAmount}
@@ -2365,10 +2380,10 @@ function CheckoutPage({ slug }) {
                     ))}
                   </div>
 
-                  {amountNgn > 0 && rateRow && (
+                  {usdAmount > 0 && rateRow && (
                     <div className="text-center mb-4">
                       <div className="font-mono text-2xl font-bold">${usdAmount.toFixed(2)}</div>
-                      <div className="text-xs text-neutral-500">Send {cryptoAmount.toFixed(6)} {cryptoAsset} · {fmtNaira(amountNgn)} · converted at today's rate</div>
+                      <div className="text-xs text-neutral-500">Send {cryptoAmount.toFixed(6)} {cryptoAsset} · {fmtNaira(flexIsUsd ? usdAmount * Number(rateRow.effective_rate) : amountNgn)} · converted at today's rate</div>
                     </div>
                   )}
 
