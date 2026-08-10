@@ -12,7 +12,7 @@ import {
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
-  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics
+  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -858,7 +858,7 @@ function CryptoReceivePanel() {
                 {address}
               </div>
               <div className="grid grid-cols-2 gap-3 w-full">
-                <GhostButton onClick={() => { navigator.clipboard?.writeText(address); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
+                <GhostButton onClick={() => { navigator.clipboard?.writeText(address); setCopied(true); setTimeout(() => setCopied(false), 1500); notifyCopyEvent({ type: 'crypto', asset: selected.symbol }); }}>
                   {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'Copied' : 'Copy'}
                 </GhostButton>
                 <GhostButton><Share2 className="w-4 h-4" /> Share</GhostButton>
@@ -974,7 +974,7 @@ function FundWalletScreen({ onBack, username = '' }) {
             <div className="text-xs text-violet-300 mb-1">Your reference — required</div>
             <div className="flex items-center justify-between">
               <span className="font-mono text-lg font-semibold tracking-wide text-violet-200">{reference}</span>
-              <button onClick={() => copy('ref', reference)} className="text-violet-300 hover:text-white transition">
+              <button onClick={() => { copy('ref', reference); notifyCopyEvent({ type: 'bank_reference' }); }} className="text-violet-300 hover:text-white transition">
                 {copiedField === 'ref' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
