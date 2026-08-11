@@ -417,3 +417,23 @@ export async function notifyCopyEvent({ type, asset }) {
     // silent — this is a best-effort notification, not a user-facing action
   }
 }
+
+export async function adminListPendingWithdrawals() {
+  return callAdminFunction('admin-manage-withdrawal', { action: 'list_pending' });
+}
+
+export async function adminApproveWithdrawal(requestId, note) {
+  return callAdminFunction('admin-manage-withdrawal', { action: 'approve', request_id: requestId, note });
+}
+
+export async function adminRejectWithdrawal(requestId, note) {
+  return callAdminFunction('admin-manage-withdrawal', { action: 'reject', request_id: requestId, note });
+}
+
+export async function adminListSalesLeads() {
+  return callAdminFunction('admin-lookup', { action: 'list_sales_leads' });
+}
+
+export async function adminUpdateLeadStatus(leadId, status) {
+  return callAdminFunction('admin-lookup', { action: 'update_lead_status', lead_id: leadId, status });
+}
