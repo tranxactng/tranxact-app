@@ -9,6 +9,7 @@ import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, askXactAI,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
+  adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
@@ -1574,12 +1575,66 @@ function AdminScreen() {
   const [tpSuccess, setTpSuccess] = useState(null);
   const [pendingNotices, setPendingNotices] = useState(null);
   const [stats, setStats] = useState(null);
+  const [pendingWithdrawals, setPendingWithdrawals] = useState(null);
+  const [withdrawalActionLoading, setWithdrawalActionLoading] = useState(null);
+  const [salesLeads, setSalesLeads] = useState(null);
+  const [leadActionLoading, setLeadActionLoading] = useState(null);
 
   const loadStats = async () => {
     try {
       setStats(await adminGetOverviewStats());
     } catch {
       setStats(null);
+    }
+  };
+
+  const loadWithdrawals = async () => {
+    try {
+      const res = await adminListPendingWithdrawals();
+      setPendingWithdrawals(res.requests || []);
+    } catch {
+      setPendingWithdrawals([]);
+    }
+  };
+
+  const handleApproveWithdrawal = async (id) => {
+    setWithdrawalActionLoading(id);
+    try {
+      await adminApproveWithdrawal(id);
+      loadWithdrawals();
+      loadStats();
+    } finally {
+      setWithdrawalActionLoading(null);
+    }
+  };
+
+  const handleRejectWithdrawal = async (id) => {
+    setWithdrawalActionLoading(id);
+    try {
+      await adminRejectWithdrawal(id);
+      loadWithdrawals();
+      loadStats();
+    } finally {
+      setWithdrawalActionLoading(null);
+    }
+  };
+
+  const loadSalesLeads = async () => {
+    try {
+      const res = await adminListSalesLeads();
+      setSalesLeads(res.leads || []);
+    } catch {
+      setSalesLeads([]);
+    }
+  };
+
+  const handleUpdateLeadStatus = async (id, status) => {
+    setLeadActionLoading(id);
+    try {
+      await adminUpdateLeadStatus(id, status);
+      loadSalesLeads();
+    } finally {
+      setLeadActionLoading(null);
     }
   };
 
@@ -1607,6 +1662,8 @@ function AdminScreen() {
     loadSettlements();
     loadNotices();
     loadStats();
+    loadWithdrawals();
+    loadSalesLeads();
     supabase.rpc('get_public_rates').then(({ data }) => setRates(data || []));
   }, []);
 
@@ -1942,6 +1999,71 @@ function AdminScreen() {
             {tpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Settle Payment'}
           </PrimaryButton>
         </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-3">Pending Withdrawals</h2>
+        {pendingWithdrawals === null ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+        ) : pendingWithdrawals.length === 0 ? (
+          <p className="text-sm text-neutral-500">No pending withdrawal requests.</p>
+        ) : (
+          <div className="space-y-2">
+            {pendingWithdrawals.map(w => (
+              <div key={w.id} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">@{w.username}</span>
+                  <span className="font-mono text-sm">{fmtNaira(w.amount)}</span>
+                </div>
+                <div className="text-xs text-neutral-500 mb-3">{w.bank_name} · {w.account_number} · {w.account_name}</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <GhostButton onClick={() => handleRejectWithdrawal(w.id)} disabled={withdrawalActionLoading === w.id}>
+                    {withdrawalActionLoading === w.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reject'}
+                  </GhostButton>
+                  <button
+                    onClick={() => handleApproveWithdrawal(w.id)}
+                    disabled={withdrawalActionLoading === w.id}
+                    className="bg-emerald-500 text-black font-semibold rounded-xl py-3 text-sm hover:bg-emerald-400 transition disabled:opacity-50 flex items-center justify-center"
+                  >
+                    {withdrawalActionLoading === w.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Mark Paid'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-neutral-600 mt-2">Approve only after you've actually sent this transfer.</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-3">Sales Leads</h2>
+        {salesLeads === null ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+        ) : salesLeads.length === 0 ? (
+          <p className="text-sm text-neutral-500">No sales leads yet.</p>
+        ) : (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+            {salesLeads.map(l => (
+              <div key={l.id} className="px-4 py-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium">{l.name}</span>
+                  <select
+                    value={l.status}
+                    onChange={e => handleUpdateLeadStatus(l.id, e.target.value)}
+                    disabled={leadActionLoading === l.id}
+                    className="bg-neutral-900 border border-neutral-800 rounded-full px-2 py-1 text-xs text-neutral-300"
+                  >
+                    <option value="new">New</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                </div>
+                <div className="text-xs text-neutral-500 mb-1">{l.email}</div>
+                {l.message && <div className="text-xs text-neutral-600">{l.message}</div>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>
