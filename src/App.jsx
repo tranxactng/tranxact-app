@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
-  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, askXactAI,
+  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, askXactAI, requestAiTransfer,
+  adminListPendingAiTransfers, adminApproveAiTransfer, adminRejectAiTransfer,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
@@ -567,12 +568,11 @@ function XactAIScreen({ onBack, displayName, balance, onTransactionComplete }) {
     setConfirmLoading(true);
     try {
       if (proposal.action === 'send_money') {
-        await sendToUser(proposal.recipient_username, proposal.amount);
-        setMessages(prev => [...prev, { role: 'assistant', text: `✓ ${fmtNaira(proposal.amount)} sent to @${proposal.recipient_username}.` }]);
-        onTransactionComplete?.();
+        await requestAiTransfer(proposal.recipient_username, proposal.amount);
+        setMessages(prev => [...prev, { role: 'assistant', text: `Got it — ${fmtNaira(proposal.amount)} to @${proposal.recipient_username} is queued for approval. It'll go through once that's confirmed on the Tranxact side.` }]);
       }
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', text: `Transfer failed: ${e.message}` }]);
+      setMessages(prev => [...prev, { role: 'assistant', text: `Couldn't queue that: ${e.message}` }]);
     } finally {
       setPendingProposal(null);
       setConfirmLoading(false);
@@ -1576,6 +1576,8 @@ function AdminScreen() {
   const [pendingNotices, setPendingNotices] = useState(null);
   const [stats, setStats] = useState(null);
   const [pendingWithdrawals, setPendingWithdrawals] = useState(null);
+  const [pendingAiTransfers, setPendingAiTransfers] = useState(null);
+  const [aiTransferActionLoading, setAiTransferActionLoading] = useState(null);
   const [withdrawalActionLoading, setWithdrawalActionLoading] = useState(null);
   const [salesLeads, setSalesLeads] = useState(null);
   const [leadActionLoading, setLeadActionLoading] = useState(null);
@@ -1594,6 +1596,36 @@ function AdminScreen() {
       setPendingWithdrawals(res.requests || []);
     } catch {
       setPendingWithdrawals([]);
+    }
+  };
+
+  const loadAiTransfers = async () => {
+    try {
+      const res = await adminListPendingAiTransfers();
+      setPendingAiTransfers(res.requests || []);
+    } catch {
+      setPendingAiTransfers([]);
+    }
+  };
+
+  const handleApproveAiTransfer = async (id) => {
+    setAiTransferActionLoading(id);
+    try {
+      await adminApproveAiTransfer(id);
+      loadAiTransfers();
+      loadStats();
+    } finally {
+      setAiTransferActionLoading(null);
+    }
+  };
+
+  const handleRejectAiTransfer = async (id) => {
+    setAiTransferActionLoading(id);
+    try {
+      await adminRejectAiTransfer(id);
+      loadAiTransfers();
+    } finally {
+      setAiTransferActionLoading(null);
     }
   };
 
@@ -1663,6 +1695,7 @@ function AdminScreen() {
     loadNotices();
     loadStats();
     loadWithdrawals();
+    loadAiTransfers();
     loadSalesLeads();
     supabase.rpc('get_public_rates').then(({ data }) => setRates(data || []));
   }, []);
@@ -1999,6 +2032,39 @@ function AdminScreen() {
             {tpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Settle Payment'}
           </PrimaryButton>
         </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-3">Pending Xact Transfers</h2>
+        {pendingAiTransfers === null ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+        ) : pendingAiTransfers.length === 0 ? (
+          <p className="text-sm text-neutral-500">No pending Xact-initiated transfers.</p>
+        ) : (
+          <div className="space-y-2">
+            {pendingAiTransfers.map(t => (
+              <div key={t.id} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">@{t.sender_username} → @{t.recipient_username}</span>
+                  <span className="font-mono text-sm">{fmtNaira(t.amount)}</span>
+                </div>
+                <div className="text-xs text-neutral-500 mb-3">Requested via Xact chat</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <GhostButton onClick={() => handleRejectAiTransfer(t.id)} disabled={aiTransferActionLoading === t.id}>
+                    {aiTransferActionLoading === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reject'}
+                  </GhostButton>
+                  <button
+                    onClick={() => handleApproveAiTransfer(t.id)}
+                    disabled={aiTransferActionLoading === t.id}
+                    className="bg-emerald-500 text-black font-semibold rounded-xl py-3 text-sm hover:bg-emerald-400 transition disabled:opacity-50 flex items-center justify-center"
+                  >
+                    {aiTransferActionLoading === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Approve & Send'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>
