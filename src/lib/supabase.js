@@ -125,6 +125,37 @@ export async function sendToUser(username, amount) {
   return data; // { success, transaction_id, recipient_username }
 }
 
+// Unlike sendToUser (instant), a Xact-initiated transfer only ever queues for
+// manual admin approval — it never moves money on its own.
+export async function requestAiTransfer(recipientUsername, amount) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/request-ai-transfer`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ recipient_username: recipientUsername, amount }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to queue transfer');
+  return data; // { success, request_id }
+}
+
+export async function adminListPendingAiTransfers() {
+  return callAdminFunction('admin-manage-ai-transfer', { action: 'list_pending' });
+}
+
+export async function adminApproveAiTransfer(requestId, note) {
+  return callAdminFunction('admin-manage-ai-transfer', { action: 'approve', request_id: requestId, note });
+}
+
+export async function adminRejectAiTransfer(requestId, note) {
+  return callAdminFunction('admin-manage-ai-transfer', { action: 'reject', request_id: requestId, note });
+}
+
 // Sends one message (plus recent history) to Xact AI. Returns either a plain
 // text reply, or a proposal object the UI must show for explicit confirmation
 // before any money moves.
