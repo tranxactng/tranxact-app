@@ -142,6 +142,11 @@ export async function askXactAI(message, history = []) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Xact AI request failed');
+  if (data.type === 'diagnostic') {
+    // The backend call itself failed — surface the real reason instead of a
+    // generic failure, so this is debuggable from the chat itself.
+    throw new Error(`[${data.stage}] ${data.detail || 'Unknown error'}`);
+  }
   return data; // { type: 'text', text } | { type: 'proposal', action, recipient_username, amount, text }
 }
 
