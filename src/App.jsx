@@ -12,8 +12,10 @@ import {
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference,
+  subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
-  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent
+  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
+  getMyNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -531,7 +533,7 @@ function TransactionRow({ tx }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onTranxactPay, onSeeAll, displayName = '', balance = 0, transactions = [] }) {
+function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onTranxactPay, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -539,9 +541,13 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
           <h1 className="text-xl font-bold">Hi, {displayName} 👋</h1>
           <p className="text-neutral-500 text-sm">Welcome back</p>
         </div>
-        <button className="relative w-10 h-10 rounded-full bg-neutral-950 border border-neutral-800 flex items-center justify-center hover:bg-neutral-900 transition">
+        <button onClick={onOpenNotifications} className="relative w-10 h-10 rounded-full bg-neutral-950 border border-neutral-800 flex items-center justify-center hover:bg-neutral-900 transition">
           <Bell className="w-4 h-4" />
-          <span className="absolute top-2 right-2.5 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          {unreadCount > 0 && (
+            <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-400 text-black text-[10px] font-bold flex items-center justify-center">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -587,6 +593,79 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
 }
 
 // ---------- History ----------
+// ---------- Notifications ----------
+function NotificationsScreen({ onBack }) {
+  const [notifications, setNotifications] = useState(null);
+  const [markingAll, setMarkingAll] = useState(false);
+
+  const load = async () => {
+    try {
+      setNotifications(await getMyNotifications());
+    } catch {
+      setNotifications([]);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleTap = async (n) => {
+    if (!n.read) {
+      setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+      try { await markNotificationRead(n.id); } catch { /* best-effort */ }
+    }
+  };
+
+  const handleMarkAll = async () => {
+    setMarkingAll(true);
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    try { await markAllNotificationsRead(); } finally { setMarkingAll(false); }
+  };
+
+  const unreadCount = (notifications || []).filter(n => !n.read).length;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <BackHeader title="Notifications" onBack={onBack} />
+      </div>
+      {unreadCount > 0 && (
+        <div className="flex justify-end -mt-4 mb-4">
+          <button onClick={handleMarkAll} disabled={markingAll} className="text-xs text-violet-400 hover:text-violet-300 transition disabled:opacity-50">
+            Mark all as read
+          </button>
+        </div>
+      )}
+
+      {notifications === null ? (
+        <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>
+      ) : notifications.length === 0 ? (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl py-10 text-center">
+          <p className="text-sm text-neutral-500">No notifications yet</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {notifications.map(n => (
+            <button
+              key={n.id}
+              onClick={() => handleTap(n)}
+              className={`w-full text-left rounded-2xl p-4 border transition ${n.read ? 'bg-neutral-950 border-neutral-800' : 'bg-violet-500/10 border-violet-500/30'}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium">{n.title}</div>
+                  <div className="text-xs text-neutral-500 mt-0.5">{n.message}</div>
+                </div>
+                {!n.read && <span className="w-2 h-2 rounded-full bg-violet-400 flex-shrink-0 mt-1.5" />}
+              </div>
+              <div className="text-[11px] text-neutral-600 mt-2">{new Date(n.created_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HistoryScreen({ onBack, transactions = [] }) {
   return (
     <div>
@@ -1977,6 +2056,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
 
   const [pushEnabled, setPushEnabled] = useState(initialPushEnabled || false);
   const [pushLoading, setPushLoading] = useState(false);
+  const [pushError, setPushError] = useState('');
 
   const saveLimit = async () => {
     setLimitLoading(true);
@@ -1991,10 +2071,18 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
 
   const togglePush = async () => {
     const next = !pushEnabled;
-    setPushEnabled(next);
+    setPushError('');
     setPushLoading(true);
     try {
+      if (next) {
+        await subscribeToPush();
+      } else {
+        await unsubscribeFromPush();
+      }
       await updatePushPreference(next);
+      setPushEnabled(next);
+    } catch (e) {
+      setPushError(e.message);
     } finally {
       setPushLoading(false);
     }
@@ -2019,16 +2107,17 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm font-semibold">Push notifications</div>
-            <p className="text-xs text-neutral-600 mt-1">Your preference is saved now — actual push delivery is separate infrastructure not built yet.</p>
+            <p className="text-xs text-neutral-600 mt-1">Get alerted the moment something happens to your account — even when the app is closed.</p>
           </div>
           <button
             onClick={togglePush}
             disabled={pushLoading}
-            className={`w-12 h-7 rounded-full flex-shrink-0 flex items-center transition-colors ${pushEnabled ? 'bg-violet-600 justify-end' : 'bg-neutral-800 justify-start'} px-1`}
+            className={`w-12 h-7 rounded-full flex-shrink-0 flex items-center transition-colors ${pushEnabled ? 'bg-violet-600 justify-end' : 'bg-neutral-800 justify-start'} px-1 disabled:opacity-50`}
           >
             <span className="w-5 h-5 rounded-full bg-white block" />
           </button>
         </div>
+        {pushError && <p className="text-xs text-red-400 mt-2">{pushError}</p>}
       </div>
     </div>
   );
@@ -3131,7 +3220,8 @@ function WebDashboardApp() {
 function MobileAppRoot() {
   const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | forgotSent | welcome | app
   const [tab, setTab] = useState('home');
-  const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history
+  const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | notifications
+  const [unreadCount, setUnreadCount] = useState(0);
   const [profileView, setProfileView] = useState('main'); // main | referrals | earnings | leaderboard | support | username | security | settings | account
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [tpOpen, setTpOpen] = useState(false);
@@ -3152,6 +3242,7 @@ function MobileAppRoot() {
     setProfile(p);
     setWallet(w);
     setTransactions((t || []).map(mapTransaction));
+    getUnreadNotificationCount().then(setUnreadCount).catch(() => {});
   };
 
   const hasSeenWelcome = (session) =>
@@ -3229,9 +3320,16 @@ function MobileAppRoot() {
           onSend={() => setHomeView('send')}
           onTranxactPay={() => setTpOpen(true)}
           onSeeAll={() => setHomeView('history')}
+          onOpenNotifications={() => setHomeView('notifications')}
+          unreadCount={unreadCount}
           displayName={displayName}
           balance={balance}
           transactions={transactions}
+        />
+      )}
+      {tab === 'home' && homeView === 'notifications' && (
+        <NotificationsScreen
+          onBack={() => { setHomeView('main'); getUnreadNotificationCount().then(setUnreadCount).catch(() => {}); }}
         />
       )}
       {tab === 'home' && homeView === 'fund' && <FundWalletScreen onBack={() => setHomeView('main')} username={profile?.username || ''} />}
