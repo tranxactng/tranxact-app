@@ -417,3 +417,21 @@ export async function adminListSalesLeads() {
 export async function adminUpdateLeadStatus(leadId, status) {
   return callAdminFunction('admin-lookup', { action: 'update_lead_status', lead_id: leadId, status });
 }
+
+export async function getOrCreateMonnifyAccount() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/create-monnify-account`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: '{}',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to set up funding account');
+  if (data.type === 'diagnostic') throw new Error(`[${data.stage}] ${data.detail}`);
+  return data.account; // { user_id, account_reference, account_number, bank_name, account_name }
+}
