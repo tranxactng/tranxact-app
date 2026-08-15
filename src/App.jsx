@@ -13,7 +13,7 @@ import {
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
-  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent
+  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent, getOrCreateMonnifyAccount
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -726,11 +726,14 @@ function ReceiveScreen({ onBack }) {
 function FundWalletScreen({ onBack, username = '' }) {
   const [mode, setMode] = useState('bank');
   const [copiedField, setCopiedField] = useState(null);
+  const [account, setAccount] = useState(undefined); // undefined = loading, null = failed
+  const [accountError, setAccountError] = useState('');
 
-  const ACCOUNT_NUMBER = '6436425418';
-  const BANK_NAME = 'Moniepoint';
-  const ACCOUNT_NAME = 'Tranxact Technologies Ltd';
-  const reference = `TRX-${(username || 'USER').toUpperCase()}`;
+  useEffect(() => {
+    getOrCreateMonnifyAccount()
+      .then(setAccount)
+      .catch(e => { setAccountError(e.message); setAccount(null); });
+  }, []);
 
   const copy = (field, value) => {
     navigator.clipboard?.writeText(value);
@@ -752,42 +755,44 @@ function FundWalletScreen({ onBack, username = '' }) {
 
       {mode === 'bank' && (
         <div className="space-y-4">
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4">
-            <div>
-              <div className="text-xs text-neutral-500 mb-1">Bank Name</div>
-              <div className="text-sm font-medium">{BANK_NAME}</div>
+          {account === undefined && (
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>
+          )}
+
+          {account === null && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-5 text-center">
+              <p className="text-sm text-red-300 mb-1">Couldn't set up your funding account</p>
+              <p className="text-xs text-neutral-500">{accountError}</p>
             </div>
-            <div>
-              <div className="text-xs text-neutral-500 mb-1">Account Number</div>
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-lg font-semibold tracking-wide">{ACCOUNT_NUMBER}</span>
-                <button onClick={() => copy('account', ACCOUNT_NUMBER)} className="text-neutral-500 hover:text-white transition">
-                  {copiedField === 'account' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </button>
+          )}
+
+          {account && (
+            <>
+              <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4">
+                <div>
+                  <div className="text-xs text-neutral-500 mb-1">Bank Name</div>
+                  <div className="text-sm font-medium">{account.bank_name}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-neutral-500 mb-1">Account Number</div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-lg font-semibold tracking-wide">{account.account_number}</span>
+                    <button onClick={() => copy('account', account.account_number)} className="text-neutral-500 hover:text-white transition">
+                      {copiedField === 'account' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-neutral-500 mb-1">Account Name</div>
+                  <div className="text-sm font-medium">{account.account_name}</div>
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="text-xs text-neutral-500 mb-1">Account Name</div>
-              <div className="text-sm font-medium">{ACCOUNT_NAME}</div>
-            </div>
-          </div>
 
-          <div className="bg-violet-500/10 border border-violet-500/30 rounded-2xl p-5">
-            <div className="text-xs text-violet-300 mb-1">Your reference — required</div>
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-lg font-semibold tracking-wide text-violet-200">{reference}</span>
-              <button onClick={() => { copy('ref', reference); notifyCopyEvent({ type: 'bank_reference' }); }} className="text-violet-300 hover:text-white transition">
-                {copiedField === 'ref' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              </button>
-            </div>
-            <p className="text-xs text-violet-300/70 mt-2">
-              Paste this exactly into the transfer's narration/remark field. Without it, we can't match your payment to your wallet.
-            </p>
-          </div>
-
-          <p className="text-xs text-neutral-600 text-center">
-            Transfer any amount to this account with your reference included. It's credited to your wallet once confirmed.
-          </p>
+              <p className="text-xs text-neutral-600 text-center">
+                This account is permanently yours — transfer any amount, any time, and it's credited to your wallet automatically. No reference or narration needed.
+              </p>
+            </>
+          )}
         </div>
       )}
 
