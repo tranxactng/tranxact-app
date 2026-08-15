@@ -13,7 +13,7 @@ import {
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
-  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent, getOrCreateMonnifyAccount
+  requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -724,79 +724,11 @@ function ReceiveScreen({ onBack }) {
 
 // ---------- Fund Wallet ----------
 function FundWalletScreen({ onBack, username = '' }) {
-  const [mode, setMode] = useState('bank');
-  const [copiedField, setCopiedField] = useState(null);
-  const [account, setAccount] = useState(undefined); // undefined = loading, null = failed
-  const [accountError, setAccountError] = useState('');
-
-  useEffect(() => {
-    getOrCreateMonnifyAccount()
-      .then(setAccount)
-      .catch(e => { setAccountError(e.message); setAccount(null); });
-  }, []);
-
-  const copy = (field, value) => {
-    navigator.clipboard?.writeText(value);
-    setCopiedField(field);
-    setTimeout(() => setCopiedField(null), 1500);
-  };
-
   return (
     <div>
       <BackHeader title="Fund Wallet" onBack={onBack} />
-      <TabToggle
-        value={mode}
-        onChange={setMode}
-        options={[
-          { value: 'bank', label: 'Bank Transfer', icon: Landmark },
-          { value: 'crypto', label: 'Crypto', icon: Bitcoin },
-        ]}
-      />
-
-      {mode === 'bank' && (
-        <div className="space-y-4">
-          {account === undefined && (
-            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>
-          )}
-
-          {account === null && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-5 text-center">
-              <p className="text-sm text-red-300 mb-1">Couldn't set up your funding account</p>
-              <p className="text-xs text-neutral-500">{accountError}</p>
-            </div>
-          )}
-
-          {account && (
-            <>
-              <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4">
-                <div>
-                  <div className="text-xs text-neutral-500 mb-1">Bank Name</div>
-                  <div className="text-sm font-medium">{account.bank_name}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-neutral-500 mb-1">Account Number</div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-lg font-semibold tracking-wide">{account.account_number}</span>
-                    <button onClick={() => copy('account', account.account_number)} className="text-neutral-500 hover:text-white transition">
-                      {copiedField === 'account' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-neutral-500 mb-1">Account Name</div>
-                  <div className="text-sm font-medium">{account.account_name}</div>
-                </div>
-              </div>
-
-              <p className="text-xs text-neutral-600 text-center">
-                This account is permanently yours — transfer any amount, any time, and it's credited to your wallet automatically. No reference or narration needed.
-              </p>
-            </>
-          )}
-        </div>
-      )}
-
-      {mode === 'crypto' && <CryptoReceivePanel />}
+      <p className="text-xs text-neutral-500 mb-4">Fund your wallet with crypto — automatically converted to naira at today's rate.</p>
+      <CryptoReceivePanel />
     </div>
   );
 }
@@ -2389,7 +2321,7 @@ function VerificationModal({ onClose }) {
 
 function SupportScreen({ onBack }) {
   const faqs = [
-    { q: 'How do I fund my wallet?', a: 'Tap Fund Wallet on Home — you can pay via bank transfer to your Tranxact account, or send supported crypto.' },
+    { q: 'How do I fund my wallet?', a: 'Tap Fund Wallet on Home and send any supported crypto — it converts to naira automatically once confirmed.' },
     { q: 'Which crypto coins are supported?', a: 'ETH, BTC, USDT (TRC20), and SOL. Received crypto converts to naira automatically.' },
     { q: 'How long does a deposit take to reflect?', a: 'Usually a few minutes after the transfer or deposit is confirmed.' },
     { q: 'Is sending to a Tranxact user free?', a: 'Yes — transfers between Tranxact users have no fee.' },
