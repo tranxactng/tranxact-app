@@ -435,3 +435,103 @@ export async function getOrCreateMonnifyAccount() {
   if (data.type === 'diagnostic') throw new Error(`[${data.stage}] ${data.detail}`);
   return data.account; // { user_id, account_reference, account_number, bank_name, account_name }
 }
+
+export async function getMyNotifications(limit = 30) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('id, type, title, message, read, created_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function getUnreadNotificationCount() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('read', false);
+  if (error) return 0;
+  return count || 0;
+}
+
+export async function markNotificationRead(id) {
+  const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+export async function markAllNotificationsRead() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  await supabase.from('notifications').update({ read: true }).eq('user_id', user.id).eq('read', false);
+}
+
+// --- Push notifications ---
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+export async function subscribeToPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('Push notifications are not supported on this device/browser');
+  }
+  if (!VAPID_PUBLIC_KEY) {
+    throw new Error('Push isn\'t configured yet (missing VAPID public key)');
+  }
+
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    throw new Error('Notification permission was not granted');
+  }
+
+  // Nothing in this app registers a service worker yet — do it here,
+  // idempotent if one's already registered.
+  await navigator.serviceWorker.register('/sw.js');
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+  });
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const subJson = subscription.toJSON();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/save-push-subscription`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to save subscription');
+  return true;
+}
+
+export async function unsubscribeFromPush() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) await subscription.unsubscribe();
+  } catch {
+    // best-effort — the row still gets cleaned up server-side eventually
+    // if the endpoint starts bouncing (404/410 handling in send-push-notification)
+  }
+}
