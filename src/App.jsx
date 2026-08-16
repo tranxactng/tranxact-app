@@ -2764,7 +2764,7 @@ function DashboardOverview({ balance, totalReceived, paymentCount }) {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Overview</h1>
-      <p className="text-sm text-neutral-500 mb-8">Tranxact Pay is the infrastructure layer for how your business gets paid \u2014 links, tracking, and payouts, all in one place.</p>
+      <p className="text-sm text-neutral-500 mb-8">Tranxact Pay is the infrastructure layer for how your business gets paid — links, tracking, and payouts, all in one place.</p>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
           <div className="text-xs text-neutral-500 mb-2">Balance</div>
@@ -2779,7 +2779,7 @@ function DashboardOverview({ balance, totalReceived, paymentCount }) {
           <div className="font-mono text-2xl font-bold">{paymentCount}</div>
         </div>
       </div>
-      <p className="text-xs text-neutral-600 mt-6">This is the same Tranxact balance as your app \u2014 spendable there immediately, withdrawable here.</p>
+      <p className="text-xs text-neutral-600 mt-6">This is the same Tranxact balance as your app — spendable there immediately, withdrawable here.</p>
 
       <div className="relative bg-neutral-950 border border-violet-500/25 rounded-2xl p-6 mt-8 overflow-hidden">
         <span className="absolute top-5 right-5 text-[10px] font-semibold bg-neutral-900 border border-neutral-800 text-neutral-400 px-2.5 py-1 rounded-full">Coming Soon</span>
@@ -2788,7 +2788,7 @@ function DashboardOverview({ balance, totalReceived, paymentCount }) {
           <h2 className="text-sm font-semibold text-violet-300">Pay with Tranxact</h2>
         </div>
         <p className="text-sm text-neutral-400 max-w-md">
-          A checkout button for your own website or app \u2014 let your customers pay directly with Tranxact, without ever leaving your product. Same rates, same tracking, same balance as everything else here.
+          A checkout button for your own website or app — let your customers pay directly with Tranxact, without ever leaving your product. Same rates, same tracking, same balance as everything else here.
         </p>
       </div>
     </div>
@@ -2851,7 +2851,7 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-2">Payment Links</h1>
-      <p className="text-sm text-neutral-500 mb-8">The core of how you get paid on Tranxact \u2014 tell us what it's for, and we'll set up the right checkout for it.</p>
+      <p className="text-sm text-neutral-500 mb-8">The core of how you get paid on Tranxact — tell us what it's for, and we'll set up the right checkout for it.</p>
 
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-8">
         <h2 className="text-sm font-semibold mb-4">Create a new link</h2>
@@ -2906,11 +2906,11 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
         </div>
 
         <div className="mt-5 pt-5 border-t border-neutral-900">
-          <p className="text-xs text-neutral-500 mb-2">Need something more custom \u2014 recurring billing, high volume, a dedicated setup?</p>
+          <p className="text-xs text-neutral-500 mb-2">Need something more custom — recurring billing, high volume, a dedicated setup?</p>
           {!showSales ? (
             <button onClick={() => setShowSales(true)} className="text-sm text-violet-400 hover:text-violet-300 transition">Talk to Sales \u2192</button>
           ) : salesSent ? (
-            <p className="text-sm text-emerald-400">\u2713 Thanks \u2014 we'll be in touch shortly.</p>
+            <p className="text-sm text-emerald-400">✓ Thanks — we'll be in touch shortly.</p>
           ) : (
             <div className="space-y-3 mt-3">
               <Field label="Your name" value={salesName} onChange={e => setSalesName(e.target.value)} placeholder="Full name" />
@@ -2945,7 +2945,7 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
                   <tr key={l.id} className="border-b border-neutral-900 last:border-b-0">
                     <td className="px-5 py-3 whitespace-nowrap">{l.title}</td>
                     <td className="px-5 py-3 text-neutral-500 capitalize whitespace-nowrap">{l.link_type}</td>
-                    <td className="px-5 py-3 font-mono whitespace-nowrap">{l.link_type === 'fixed' ? fmtNaira(l.amount) : '\u2014'}</td>
+                    <td className="px-5 py-3 font-mono whitespace-nowrap">{l.link_type === 'fixed' ? fmtNaira(l.amount) : '—'}</td>
                     <td className="px-5 py-3 whitespace-nowrap">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${l.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>{l.status}</span>
                   </td>
@@ -3121,7 +3121,7 @@ function WebDashboardApp() {
     setBalance(wallet?.balance || 0);
     try { setLinks(await getMyPaymentLinks()); } catch { setLinks([]); }
     const { data: txs } = await getRecentTransactions(userId, 50);
-    setTransactions(txs || []);
+    setTransactions((txs || []).map(mapTransaction));
     try { setPayments(await getMyTranxactPayments()); } catch { setPayments([]); }
     try { setWithdrawals(await getMyWithdrawals()); } catch { setWithdrawals([]); }
     try { setAnalytics(await getDashboardAnalytics()); } catch { setAnalytics(null); }
@@ -3401,7 +3401,7 @@ function MobileAppRoot() {
 }
 
 // The single real entry point. Decides which experience to render based on
-// which domain someone's actually on \u2014 same codebase, same auth, same data,
+// which domain someone's actually on — same codebase, same auth, same data,
 // just a different front door. pay.tranxact.co gets the merchant dashboard;
 // everything else gets the normal mobile-first app.
 export default function TranxactApp() {
