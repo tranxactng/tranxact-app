@@ -11,7 +11,7 @@ import {
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
-  changeUsername, updatePassword, setTransactionPin, updateSpendingLimit, updatePushPreference,
+  changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
@@ -813,7 +813,7 @@ function FundWalletScreen({ onBack, username = '' }) {
 }
 
 // ---------- Send (naira only — Tranxact user or bank account) ----------
-function SendScreen({ onBack, onDone }) {
+function SendScreen({ onBack, onDone, hasPin }) {
   const [mode, setMode] = useState('user');
   const [step, setStep] = useState('form');
   const [username, setUsername] = useState('');
@@ -822,12 +822,15 @@ function SendScreen({ onBack, onDone }) {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
 
   const resolvedName = accountNumber.length === 10 ? 'ADAEZE C. OKAFOR' : '';
   const recipientLabel = mode === 'user' ? `@${username}` : `${resolvedName || accountNumber} · ${bank}`;
   const canReview = mode === 'user' ? (username && amount) : (accountNumber.length === 10 && amount);
 
-  const handleConfirm = async () => {
+  const executeSend = async () => {
     if (mode === 'bank') {
       // Bank transfers aren't wired to a payout provider yet — stays a UI-only
       // preview until that's built.
@@ -846,6 +849,34 @@ function SendScreen({ onBack, onDone }) {
     }
   };
 
+  const handleConfirm = () => {
+    if (hasPin) {
+      setPinError('');
+      setStep('pin');
+      return;
+    }
+    executeSend();
+  };
+
+  const handlePinSubmit = async () => {
+    setPinError('');
+    setPinLoading(true);
+    try {
+      const valid = await verifyTransactionPin(pin);
+      if (!valid) {
+        setPinError('Incorrect PIN');
+        setPinLoading(false);
+        return;
+      }
+      setPin('');
+      await executeSend();
+    } catch (e) {
+      setPinError(e.message);
+    } finally {
+      setPinLoading(false);
+    }
+  };
+
   if (step === 'success') {
     return (
       <div className="flex flex-col items-center text-center pt-10">
@@ -855,6 +886,27 @@ function SendScreen({ onBack, onDone }) {
         <h2 className="text-lg font-bold mb-1">Sent successfully</h2>
         <p className="text-neutral-500 text-sm mb-8">{fmtNaira(Number(amount) || 0)} is on its way to {recipientLabel}.</p>
         <PrimaryButton onClick={onDone}>Done</PrimaryButton>
+      </div>
+    );
+  }
+
+  if (step === 'pin') {
+    return (
+      <div>
+        <BackHeader title="Enter PIN" onBack={() => setStep('confirm')} />
+        <p className="text-sm text-neutral-500 mb-6">Enter your transaction PIN to send {fmtNaira(Number(amount) || 0)} to {recipientLabel}.</p>
+        <Field
+          label="Transaction PIN"
+          type="password"
+          inputMode="numeric"
+          value={pin}
+          onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          placeholder="••••"
+        />
+        {pinError && <p className="text-sm text-red-400 mt-3">{pinError}</p>}
+        <PrimaryButton onClick={handlePinSubmit} disabled={pinLoading || pin.length < 4} className="mt-5">
+          {pinLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm'}
+        </PrimaryButton>
       </div>
     );
   }
@@ -1456,6 +1508,7 @@ function AdminScreen() {
   };
 
   const [settlements, setSettlements] = useState(null);
+  const [showAllSettlements, setShowAllSettlements] = useState(false);
 
   const loadNotices = async () => {
     try {
@@ -1890,17 +1943,27 @@ function AdminScreen() {
         ) : settlements.length === 0 ? (
           <p className="text-sm text-neutral-500">No settlements yet.</p>
         ) : (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
-            {settlements.map(s => (
-              <div key={s.id} className="flex items-center justify-between px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium">@{s.username}</div>
-                  <div className="text-xs text-neutral-500">{s.type}{s.crypto_asset ? ` · ${s.crypto_asset}` : ''}</div>
+          <>
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+              {(showAllSettlements ? settlements : settlements.slice(0, 5)).map(s => (
+                <div key={s.id} className="flex items-center justify-between px-4 py-3">
+                  <div>
+                    <div className="text-sm font-medium">@{s.username}</div>
+                    <div className="text-xs text-neutral-500">{s.type}{s.crypto_asset ? ` · ${s.crypto_asset}` : ''}</div>
+                  </div>
+                  <span className="font-mono text-sm">{fmtNaira(s.amount_ngn)}</span>
                 </div>
-                <span className="font-mono text-sm">{fmtNaira(s.amount_ngn)}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+            {settlements.length > 5 && (
+              <button
+                onClick={() => setShowAllSettlements(v => !v)}
+                className="w-full text-center text-xs text-violet-400 hover:text-violet-300 transition mt-3 py-1"
+              >
+                {showAllSettlements ? 'Show less' : `See all (${settlements.length})`}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -2096,7 +2159,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
         <div className="flex gap-2">
           <Field label="Amount (NGN, optional)" type="number" value={limit} onChange={e => setLimit(e.target.value)} placeholder="No limit set" />
         </div>
-        <p className="text-xs text-neutral-600 mt-2">This is stored now — enforcement across Send/withdrawals is coming as those features grow.</p>
+        <p className="text-xs text-neutral-600 mt-2">Applies to sends and withdrawals — resets on a rolling 24-hour basis. Leave blank for no limit.</p>
         {limitSaved && <p className="text-sm text-emerald-400 mt-2">Saved.</p>}
         <PrimaryButton onClick={saveLimit} disabled={limitLoading} className="mt-4">
           {limitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save limit'}
@@ -2908,7 +2971,7 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
         <div className="mt-5 pt-5 border-t border-neutral-900">
           <p className="text-xs text-neutral-500 mb-2">Need something more custom — recurring billing, high volume, a dedicated setup?</p>
           {!showSales ? (
-            <button onClick={() => setShowSales(true)} className="text-sm text-violet-400 hover:text-violet-300 transition">Talk to Sales \u2192</button>
+            <button onClick={() => setShowSales(true)} className="text-sm text-violet-400 hover:text-violet-300 transition">Talk to Sales →</button>
           ) : salesSent ? (
             <p className="text-sm text-emerald-400">✓ Thanks — we'll be in touch shortly.</p>
           ) : (
@@ -3338,6 +3401,7 @@ function MobileAppRoot() {
         <SendScreen
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
+          hasPin={!!profile?.pin_hash}
         />
       )}
       {tab === 'home' && homeView === 'history' && <HistoryScreen onBack={() => setHomeView('main')} transactions={transactions} />}
