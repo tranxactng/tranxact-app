@@ -78,10 +78,10 @@ export async function getRecentTransactions(userId, limit = 20) {
 
   let senderUsernames = {};
   if (needsSenderLookup.length > 0) {
-    const { data: senderProfiles } = await supabase
-      .from('profiles')
-      .select('id, username')
-      .in('id', [...new Set(needsSenderLookup)]);
+    // Direct profiles table lookup is blocked by RLS for anyone but yourself —
+    // this RPC is a narrow, deliberate exception that only ever returns
+    // usernames (nothing else from the profile row).
+    const { data: senderProfiles } = await supabase.rpc('get_usernames_by_ids', { p_ids: [...new Set(needsSenderLookup)] });
     senderUsernames = Object.fromEntries((senderProfiles || []).map(p => [p.id, p.username]));
   }
 
