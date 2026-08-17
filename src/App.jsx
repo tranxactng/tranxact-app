@@ -62,6 +62,15 @@ function mapTransaction(row) {
   const pending = row.status === 'pending';
   const createdDate = new Date(normalizeTimestamp(row.created_at));
   const validDate = !isNaN(createdDate.getTime());
+  // Two transactions on the same day both showing "17 Aug" are indistinguishable
+  // in the list — show the actual time for anything from today, and fall back
+  // to a date for older entries, so the list itself carries real ordering info.
+  const isToday = validDate && createdDate.toDateString() === new Date().toDateString();
+  const listTime = validDate
+    ? (isToday
+        ? createdDate.toLocaleTimeString('en-NG', { hour: 'numeric', minute: '2-digit' })
+        : createdDate.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }))
+    : '';
   return {
     id: row.id,
     type: row.type,
@@ -72,7 +81,7 @@ function mapTransaction(row) {
     description: row.description,
     cryptoAsset: row.crypto_asset,
     amount: row.amount_ngn != null ? Number(row.amount_ngn) : 0,
-    time: validDate ? createdDate.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '',
+    time: listTime,
     fullTime: validDate ? createdDate.toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' }) : '',
     icon: meta.icon,
   };
