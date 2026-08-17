@@ -21,6 +21,7 @@ import {
 // ---------- Demo data ----------
 const ASSETS = [
   { symbol: 'USDT', name: 'Tether', network: 'TRC20', address: 'TXk9Qm2vD8yZp4Rj7Ln3fQ2xVh5tYc9Bwe', price: 1550.2, change: 0.02 },
+  { symbol: 'USDC', name: 'USD Coin', network: 'ERC20', address: '0x71C7656EC7ab88b098defB751B7401B4B2a1234', price: 1550.2, change: 0.01 },
   { symbol: 'BTC', name: 'Bitcoin', network: 'Bitcoin', address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p8x9z2mk4', price: 150775000, change: 2.4 },
   { symbol: 'ETH', name: 'Ethereum', network: 'ERC20', address: '0x71C7656EC7ab88b098defB751B7401B4B2a1234', price: 5394000, change: -1.2 },
   { symbol: 'SOL', name: 'Solana', network: 'Solana', address: '7xKXtg2CW3ed1qUFysrDDpQ3merWaK4Q3zJvyPq3m', price: 332475, change: 5.1 },
@@ -35,6 +36,16 @@ const BILLS = [
 ];
 
 // Maps a real transactions-table row to what TransactionRow expects to render
+// Postgres returns timestamps like "2026-08-16 10:07:23.109573+00" — two
+// separate problems for JS's Date parser: a space instead of "T", and a bare
+// 2-digit timezone offset ("+00") with no minutes, which fails ISO 8601
+// parsing even in Node/V8, not just Safari. Every place a raw created_at
+// string gets parsed needs this, not just transaction rows.
+function normalizeTimestamp(raw) {
+  if (typeof raw !== 'string') return raw;
+  return raw.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+}
+
 function mapTransaction(row) {
   const byType = {
     crypto_deposit: { title: `${row.crypto_asset || 'Crypto'} received`, icon: ArrowDownToLine },
@@ -49,6 +60,8 @@ function mapTransaction(row) {
   };
   const meta = byType[row.type] || { title: row.type, icon: Wallet };
   const pending = row.status === 'pending';
+  const createdDate = new Date(normalizeTimestamp(row.created_at));
+  const validDate = !isNaN(createdDate.getTime());
   return {
     id: row.id,
     type: row.type,
@@ -59,8 +72,8 @@ function mapTransaction(row) {
     description: row.description,
     cryptoAsset: row.crypto_asset,
     amount: row.amount_ngn != null ? Number(row.amount_ngn) : 0,
-    time: new Date(row.created_at).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }),
-    fullTime: new Date(row.created_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' }),
+    time: validDate ? createdDate.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '',
+    fullTime: validDate ? createdDate.toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' }) : '',
     icon: meta.icon,
   };
 }
@@ -657,7 +670,7 @@ function NotificationsScreen({ onBack }) {
                 </div>
                 {!n.read && <span className="w-2 h-2 rounded-full bg-violet-400 flex-shrink-0 mt-1.5" />}
               </div>
-              <div className="text-[11px] text-neutral-600 mt-2">{new Date(n.created_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+              <div className="text-[11px] text-neutral-600 mt-2">{new Date(normalizeTimestamp(n.created_at)).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}</div>
             </button>
           ))}
         </div>
@@ -987,6 +1000,7 @@ function TranxactPayScreen({ onClose, username }) {
   const [payments, setPayments] = useState(null);
   const [copied, setCopied] = useState('');
   const [viewingQr, setViewingQr] = useState(null); // slug of the link whose QR is expanded
+  const [viewingEmbed, setViewingEmbed] = useState(null); // slug of the link whose embed snippet is expanded
 
   const loadLinks = async () => {
     try {
@@ -1064,6 +1078,11 @@ function TranxactPayScreen({ onClose, username }) {
     const url = `https://app.tranxact.co/pay/${link.slug}`;
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}`;
     const showingQr = viewingQr === link.slug;
+    const showingEmbed = viewingEmbed === link.slug;
+    const embedCode = `<a href="${url}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;background:#111;color:#fff;padding:12px 20px;border-radius:12px;font-family:-apple-system,sans-serif;font-weight:600;font-size:14px;text-decoration:none;">
+  <img src="https://app.tranxact.co/icon-192.png" alt="" style="width:20px;height:20px;border-radius:4px;" />
+  Pay with Tranxact
+</a>`;
     return (
       <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4">
         <div className="flex items-center justify-between mb-2">
@@ -1079,12 +1098,25 @@ function TranxactPayScreen({ onClose, username }) {
           </div>
         )}
 
-        <div className={`grid gap-2 ${link.status === 'active' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        {showingEmbed && (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 mb-3">
+            <p className="text-xs text-neutral-500 mb-2">Paste this into your site's HTML — it'll render as a real button linking to this checkout.</p>
+            <pre className="text-[11px] text-violet-300 font-mono whitespace-pre-wrap break-all bg-black/40 rounded-lg p-2 mb-2">{embedCode}</pre>
+            <button onClick={() => copy(embedCode, `embed-${link.slug}`)} className="w-full flex items-center justify-center gap-1.5 bg-neutral-800 rounded-lg py-2 text-xs">
+              {copied === `embed-${link.slug}` ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied === `embed-${link.slug}` ? 'Copied' : 'Copy code'}
+            </button>
+          </div>
+        )}
+
+        <div className={`grid gap-2 ${link.status === 'active' ? 'grid-cols-4' : 'grid-cols-3'}`}>
           {link.status === 'active' && (
             <button onClick={() => setViewingQr(showingQr ? null : link.slug)} className="flex items-center justify-center gap-1.5 bg-neutral-800 rounded-lg py-2 text-xs">
               <QrCode className="w-3.5 h-3.5" /> QR
             </button>
           )}
+          <button onClick={() => setViewingEmbed(showingEmbed ? null : link.slug)} className="flex items-center justify-center gap-1.5 bg-neutral-800 rounded-lg py-2 text-xs">
+            <Link2 className="w-3.5 h-3.5" /> Embed
+          </button>
           <button onClick={() => copy(url, link.slug)} className="flex items-center justify-center gap-1.5 bg-neutral-800 rounded-lg py-2 text-xs">
             {copied === link.slug ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied === link.slug ? 'Copied' : 'Copy'}
           </button>
@@ -1216,7 +1248,7 @@ function TranxactPayScreen({ onClose, username }) {
                   <div key={i} className="flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
                     <div>
                       <div className="text-sm font-medium">{p.link_title || 'Payment'}</div>
-                      <div className="text-xs text-neutral-500">{new Date(p.created_at).toLocaleDateString()}</div>
+                      <div className="text-xs text-neutral-500">{new Date(normalizeTimestamp(p.created_at)).toLocaleDateString()}</div>
                     </div>
                     <div className="text-right">
                       <div className="font-mono text-sm text-emerald-400">+{fmtNaira(p.amount)}</div>
@@ -1978,7 +2010,7 @@ function AccountDetailsScreen({ onBack, profile }) {
   }, []);
 
   const memberSince = profile?.created_at
-    ? new Date(profile.created_at).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
+    ? new Date(normalizeTimestamp(profile.created_at)).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
     : '—';
 
   const rows = [
@@ -2188,7 +2220,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
 
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
-const CRYPTO_NETWORK_LABEL = { BTC: 'Bitcoin network', ETH: 'Ethereum network', USDT: 'TRC20 (Tron) network', SOL: 'Solana network' };
+const CRYPTO_NETWORK_LABEL = { BTC: 'Bitcoin network', ETH: 'Ethereum network', USDT: 'TRC20 (Tron) network', USDC: 'ERC-20 (Ethereum) network', SOL: 'Solana network' };
 
 function CheckoutPage({ slug }) {
   const [link, setLink] = useState(undefined); // undefined = loading, null = not found
@@ -2474,7 +2506,7 @@ function VerificationModal({ onClose }) {
 function SupportScreen({ onBack }) {
   const faqs = [
     { q: 'How do I fund my wallet?', a: 'Tap Fund Wallet on Home and send any supported crypto — it converts to naira automatically once confirmed.' },
-    { q: 'Which crypto coins are supported?', a: 'ETH, BTC, USDT (TRC20), and SOL. Received crypto converts to naira automatically.' },
+    { q: 'Which crypto coins are supported?', a: 'ETH, BTC, USDT (TRC20), USDC (ERC-20), and SOL. Received crypto converts to naira automatically.' },
     { q: 'How long does a deposit take to reflect?', a: 'Usually a few minutes after the transfer or deposit is confirmed.' },
     { q: 'Is sending to a Tranxact user free?', a: 'Yes — transfers between Tranxact users have no fee.' },
   ];
@@ -2845,13 +2877,15 @@ function DashboardOverview({ balance, totalReceived, paymentCount }) {
       <p className="text-xs text-neutral-600 mt-6">This is the same Tranxact balance as your app — spendable there immediately, withdrawable here.</p>
 
       <div className="relative bg-neutral-950 border border-violet-500/25 rounded-2xl p-6 mt-8 overflow-hidden">
-        <span className="absolute top-5 right-5 text-[10px] font-semibold bg-neutral-900 border border-neutral-800 text-neutral-400 px-2.5 py-1 rounded-full">Coming Soon</span>
         <div className="flex items-center gap-2 mb-2">
           <Link2 className="w-4 h-4 text-violet-400" />
           <h2 className="text-sm font-semibold text-violet-300">Pay with Tranxact</h2>
         </div>
         <p className="text-sm text-neutral-400 max-w-md">
-          A checkout button for your own website or app — let your customers pay directly with Tranxact, without ever leaving your product. Same rates, same tracking, same balance as everything else here.
+          A checkout button for your own website — let customers pay directly with Tranxact, without ever leaving your product. Same rates, same tracking, same balance as everything else here.
+        </p>
+        <p className="text-xs text-neutral-500 mt-3">
+          Head to <span className="text-violet-400 font-medium">Payment Links</span> and tap "Copy embed" on any link to grab the button code.
         </p>
       </div>
     </div>
@@ -3013,9 +3047,17 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
                     <span className={`text-xs px-2 py-0.5 rounded-full ${l.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>{l.status}</span>
                   </td>
                   <td className="px-5 py-3">
-                    <button onClick={() => copy(`https://app.tranxact.co/pay/${l.slug}`, l.slug)} className="text-violet-400 text-xs flex items-center gap-1">
-                      {copied === l.slug ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied === l.slug ? 'Copied' : 'Copy link'}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => copy(`https://app.tranxact.co/pay/${l.slug}`, l.slug)} className="text-violet-400 text-xs flex items-center gap-1">
+                        {copied === l.slug ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied === l.slug ? 'Copied' : 'Copy link'}
+                      </button>
+                      <button
+                        onClick={() => copy(`<a href="https://app.tranxact.co/pay/${l.slug}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;background:#111;color:#fff;padding:12px 20px;border-radius:12px;font-family:-apple-system,sans-serif;font-weight:600;font-size:14px;text-decoration:none;">\n  <img src="https://app.tranxact.co/icon-192.png" alt="" style="width:20px;height:20px;border-radius:4px;" />\n  Pay with Tranxact\n</a>`, `embed-${l.slug}`)}
+                        className="text-neutral-400 text-xs flex items-center gap-1"
+                      >
+                        {copied === `embed-${l.slug}` ? <Check className="w-3.5 h-3.5" /> : <Link2 className="w-3.5 h-3.5" />} {copied === `embed-${l.slug}` ? 'Copied' : 'Copy embed'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
