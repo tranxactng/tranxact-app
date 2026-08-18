@@ -350,7 +350,7 @@ export async function adminGetOverviewStats() {
   return callAdminFunction('admin-overview-stats', {});
 }
 
-export async function requestWithdrawal({ amount, bank_name, account_number, account_name }) {
+export async function requestWithdrawal({ amount, bank_name, bank_code, account_number, account_name }) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
 
@@ -360,11 +360,45 @@ export async function requestWithdrawal({ amount, bank_name, account_number, acc
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ amount, bank_name, account_number, account_name }),
+    body: JSON.stringify({ amount, bank_name, bank_code, account_number, account_name }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Withdrawal request failed');
-  return data; // { success, request_id, amount }
+  return data; // { success, request_id, amount, status }
+}
+
+// Real Nigerian bank list from Paystack, with the bank_code each one needs
+// for both account resolution and the actual transfer.
+export async function listPaystackBanks() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/list-paystack-banks`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load banks');
+  return data.banks; // [{ name, code, slug }]
+}
+
+// Resolves an account number + bank to the real registered account name —
+// this is what replaces any fake/placeholder name in the UI.
+export async function resolveBankAccount(accountNumber, bankCode) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/resolve-bank-account`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ account_number: accountNumber, bank_code: bankCode }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Could not resolve account');
+  return data; // { account_name, account_number }
 }
 
 export async function getMyWithdrawals() {
