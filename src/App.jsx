@@ -15,6 +15,7 @@ import {
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
+  listPaystackBanks, resolveBankAccount,
   getMyNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead
 } from './lib/supabase.js';
 
@@ -95,7 +96,6 @@ const NAV = [
   { key: 'profile', label: 'Profile', icon: User },
 ];
 
-const BANKS = ['Access Bank', 'GTBank', 'Zenith Bank', 'UBA', 'First Bank', 'Kuda', 'Opay', 'Moniepoint', 'Wema Bank', 'Fidelity Bank'];
 
 // Mirrors fee_settings in the database, for preview purposes only — the actual
 // fee applied always comes from the server, this is just so the admin sees an
@@ -839,7 +839,9 @@ function SendScreen({ onBack, onDone, hasPin }) {
   const [mode, setMode] = useState('user');
   const [step, setStep] = useState('form');
   const [username, setUsername] = useState('');
-  const [bank, setBank] = useState(BANKS[0]);
+  const [banks, setBanks] = useState(null); // null = loading, [] = failed/empty
+  const [banksError, setBanksError] = useState('');
+  const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
@@ -848,21 +850,49 @@ function SendScreen({ onBack, onDone, hasPin }) {
   const [pinError, setPinError] = useState('');
   const [pinLoading, setPinLoading] = useState(false);
 
-  const resolvedName = accountNumber.length === 10 ? 'ADAEZE C. OKAFOR' : '';
-  const recipientLabel = mode === 'user' ? `@${username}` : `${resolvedName || accountNumber} · ${bank}`;
-  const canReview = mode === 'user' ? (username && amount) : (accountNumber.length === 10 && amount);
+  const [resolvedName, setResolvedName] = useState('');
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState('');
+
+  useEffect(() => {
+    if (mode !== 'bank' || banks !== null) return;
+    listPaystackBanks()
+      .then(setBanks)
+      .catch(e => { setBanksError(e.message); setBanks([]); });
+  }, [mode, banks]);
+
+  useEffect(() => {
+    setResolvedName('');
+    setResolveError('');
+    if (accountNumber.length !== 10 || !bankCode) return;
+    let cancelled = false;
+    setResolving(true);
+    resolveBankAccount(accountNumber, bankCode)
+      .then(res => { if (!cancelled) setResolvedName(res.account_name); })
+      .catch(e => { if (!cancelled) setResolveError(e.message); })
+      .finally(() => { if (!cancelled) setResolving(false); });
+    return () => { cancelled = true; };
+  }, [accountNumber, bankCode]);
+
+  const selectedBank = (banks || []).find(b => b.code === bankCode);
+  const recipientLabel = mode === 'user' ? `@${username}` : `${resolvedName || accountNumber}${selectedBank ? ' · ' + selectedBank.name : ''}`;
+  const canReview = mode === 'user' ? (username && amount) : (accountNumber.length === 10 && amount && resolvedName && !resolving);
 
   const executeSend = async () => {
-    if (mode === 'bank') {
-      // Bank transfers aren't wired to a payout provider yet — stays a UI-only
-      // preview until that's built.
-      setStep('success');
-      return;
-    }
     setError('');
     setLoading(true);
     try {
-      await sendToUser(username, Number(amount));
+      if (mode === 'bank') {
+        await requestWithdrawal({
+          amount: Number(amount),
+          bank_name: selectedBank?.name || '',
+          bank_code: bankCode,
+          account_number: accountNumber,
+          account_name: resolvedName,
+        });
+      } else {
+        await sendToUser(username, Number(amount));
+      }
       setStep('success');
     } catch (e) {
       setError(e.message);
@@ -939,7 +969,7 @@ function SendScreen({ onBack, onDone, hasPin }) {
         <BackHeader title="Confirm" onBack={() => setStep('form')} />
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Recipient</span><span>{recipientLabel}</span></div>
-          {mode === 'bank' && <div className="flex justify-between text-sm"><span className="text-neutral-500">Bank</span><span>{bank}</span></div>}
+          {mode === 'bank' && <div className="flex justify-between text-sm"><span className="text-neutral-500">Bank</span><span>{selectedBank?.name}</span></div>}
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(Number(amount) || 0)}</span></div>
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Fee</span><span className="font-mono">₦0.00</span></div>
         </div>
@@ -971,17 +1001,26 @@ function SendScreen({ onBack, onDone, hasPin }) {
               <span className="text-sm text-neutral-400 mb-2 block">Bank</span>
               <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
                 <Landmark className="w-4 h-4 text-neutral-500 flex-shrink-0" />
-                <select
-                  value={bank}
-                  onChange={e => setBank(e.target.value)}
-                  className="bg-transparent outline-none text-white text-sm w-full appearance-none"
-                >
-                  {BANKS.map(b => <option key={b} value={b} className="bg-neutral-900">{b}</option>)}
-                </select>
+                {banks === null ? (
+                  <span className="text-sm text-neutral-500">Loading banks…</span>
+                ) : banks.length === 0 ? (
+                  <span className="text-sm text-red-400">{banksError || 'Could not load banks'}</span>
+                ) : (
+                  <select
+                    value={bankCode}
+                    onChange={e => setBankCode(e.target.value)}
+                    className="bg-transparent outline-none text-white text-sm w-full appearance-none"
+                  >
+                    <option value="" className="bg-neutral-900">Select a bank</option>
+                    {banks.map(b => <option key={b.code} value={b.code} className="bg-neutral-900">{b.name}</option>)}
+                  </select>
+                )}
               </div>
             </label>
             <Field label="Account number" value={accountNumber} onChange={e => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="0123456789" />
+            {resolving && <div className="text-sm text-neutral-500 -mt-2 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying account…</div>}
             {resolvedName && <div className="text-sm text-emerald-400 -mt-2">{resolvedName}</div>}
+            {resolveError && <div className="text-sm text-red-400 -mt-2">{resolveError}</div>}
           </>
         )}
         <Field label="Amount" value={amount} onChange={e => setAmount(e.target.value)} type="number" placeholder="0.00" />
@@ -3162,12 +3201,45 @@ function DashboardTransactions({ transactions }) {
 
 function DashboardWithdrawals({ balance, withdrawals, onRequest, requesting, requestError, requestSuccess }) {
   const [amount, setAmount] = useState('');
-  const [bankName, setBankName] = useState(BANKS[0]);
+  const [banks, setBanks] = useState(null);
+  const [banksError, setBanksError] = useState('');
+  const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
-  const [accountName, setAccountName] = useState('');
+  const [resolvedName, setResolvedName] = useState('');
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState('');
+
+  useEffect(() => {
+    if (banks !== null) return;
+    listPaystackBanks()
+      .then(setBanks)
+      .catch(e => { setBanksError(e.message); setBanks([]); });
+  }, [banks]);
+
+  useEffect(() => {
+    setResolvedName('');
+    setResolveError('');
+    if (accountNumber.length !== 10 || !bankCode) return;
+    let cancelled = false;
+    setResolving(true);
+    resolveBankAccount(accountNumber, bankCode)
+      .then(res => { if (!cancelled) setResolvedName(res.account_name); })
+      .catch(e => { if (!cancelled) setResolveError(e.message); })
+      .finally(() => { if (!cancelled) setResolving(false); });
+    return () => { cancelled = true; };
+  }, [accountNumber, bankCode]);
+
+  const selectedBank = (banks || []).find(b => b.code === bankCode);
+  const canSubmit = amount && bankCode && accountNumber.length === 10 && resolvedName && !resolving;
 
   const handleSubmit = () => {
-    onRequest({ amount: Number(amount), bank_name: bankName, account_number: accountNumber, account_name: accountName });
+    onRequest({
+      amount: Number(amount),
+      bank_name: selectedBank?.name || '',
+      bank_code: bankCode,
+      account_number: accountNumber,
+      account_name: resolvedName,
+    });
   };
 
   return (
@@ -3180,16 +3252,36 @@ function DashboardWithdrawals({ balance, withdrawals, onRequest, requesting, req
           <Field label="Amount (NGN)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
           <div>
             <span className="text-sm text-neutral-400 mb-2 block">Bank</span>
-            <select value={bankName} onChange={e => setBankName(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white">
-              {BANKS.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
+            {banks === null ? (
+              <div className="text-sm text-neutral-500 py-2.5">Loading banks…</div>
+            ) : banks.length === 0 ? (
+              <div className="text-sm text-red-400 py-2.5">{banksError || 'Could not load banks'}</div>
+            ) : (
+              <select value={bankCode} onChange={e => setBankCode(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white">
+                <option value="">Select a bank</option>
+                {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+              </select>
+            )}
           </div>
-          <Field label="Account Number" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="0123456789" />
-          <Field label="Account Name" value={accountName} onChange={e => setAccountName(e.target.value)} placeholder="As it appears on your bank account" />
+          <Field label="Account Number" value={accountNumber} onChange={e => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="0123456789" />
+          <div>
+            <span className="text-sm text-neutral-400 mb-2 block">Account Name</span>
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm min-h-[42px] flex items-center">
+              {resolving ? (
+                <span className="text-neutral-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying…</span>
+              ) : resolvedName ? (
+                <span className="text-emerald-400">{resolvedName}</span>
+              ) : resolveError ? (
+                <span className="text-red-400">{resolveError}</span>
+              ) : (
+                <span className="text-neutral-600">Resolved automatically</span>
+              )}
+            </div>
+          </div>
         </div>
         {requestError && <p className="text-sm text-red-400 mt-3">{requestError}</p>}
         {requestSuccess && <p className="text-sm text-emerald-400 mt-3">✓ Withdrawal request submitted — you'll be paid once it's processed.</p>}
-        <PrimaryButton onClick={handleSubmit} disabled={requesting || !amount || !accountNumber || !accountName} className="mt-4" style={{ width: 'auto' }}>
+        <PrimaryButton onClick={handleSubmit} disabled={requesting || !canSubmit} className="mt-4" style={{ width: 'auto' }}>
           {requesting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Request Withdrawal'}
         </PrimaryButton>
       </div>
@@ -3205,7 +3297,7 @@ function DashboardWithdrawals({ balance, withdrawals, onRequest, requesting, req
                 <div className="text-sm font-medium">{fmtNaira(w.amount)}</div>
                 <div className="text-xs text-neutral-500">{w.bank_name} · {w.account_number}</div>
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${w.status === 'paid' ? 'bg-emerald-500/15 text-emerald-400' : w.status === 'rejected' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>{w.status}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${w.status === 'paid' ? 'bg-emerald-500/15 text-emerald-400' : w.status === 'rejected' || w.status === 'transfer_failed' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>{w.status}</span>
             </div>
           ))
         )}
