@@ -3,7 +3,7 @@ import {
   Eye, EyeOff, Bell, ArrowDownToLine, ArrowUpFromLine, Link2, Smartphone, Wifi, Zap, Tv,
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
-  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3
+  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -568,11 +568,172 @@ function ServiceTile({ label, icon: Icon }) {
   );
 }
 
-function TransactionDetailModal({ tx, onClose }) {
-  const [shared, setShared] = useState(false);
+// ---------- Branded receipt (Tranxact equivalent of OPay's "Share Receipt") ----------
+// Requires two extra dependencies: `html2canvas` (renders this DOM node into a
+// real PNG canvas) and `jspdf` (wraps that PNG into a one-page PDF). Neither
+// was confirmed present in package.json — run:
+//   npm install html2canvas jspdf
+// before shipping this, or the two share buttons below will throw on tap.
+const ReceiptCard = React.forwardRef(({ tx }, ref) => {
+  const positive = tx.amount > 0;
+  const otherPartyLabel = tx.counterparty ? (positive ? 'Sender Details' : 'Recipient Details') : null;
+  const maskedRef = tx.id ? `${tx.id.slice(0, 8)}${'*'.repeat(4)}${tx.id.slice(-4)}` : '';
+
+  return (
+    <div
+      ref={ref}
+      className="relative overflow-hidden rounded-2xl p-6"
+      style={{ background: '#111114', border: '1px solid #27272a', width: 360 }}
+    >
+      {/* Faint repeated wordmark watermark, like OPay's receipt background */}
+      <div
+        className="absolute inset-0 opacity-[0.05] pointer-events-none select-none"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '28px',
+          padding: '10px',
+          transform: 'rotate(-18deg) scale(1.4)',
+          color: '#fff',
+          fontWeight: 800,
+          fontSize: 13,
+          letterSpacing: 1,
+        }}
+      >
+        {Array.from({ length: 40 }).map((_, i) => <span key={i}>Tranxact</span>)}
+      </div>
+
+      <div className="relative flex items-center justify-between mb-8">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center flex-shrink-0">
+            <LogoMark size={16} />
+          </div>
+          <span className="font-bold text-white text-sm">Tranxact</span>
+        </div>
+        <span className="text-xs text-neutral-400">Transaction Receipt</span>
+      </div>
+
+      <div className="relative text-center mb-6">
+        <div className={`font-mono text-3xl font-bold ${positive ? 'text-emerald-400' : 'text-white'}`}>
+          {fmtNaira(tx.amount)}
+        </div>
+        <div className="text-sm text-neutral-300 mt-2 capitalize">{tx.status || 'Settled'}</div>
+        <div className="text-xs text-neutral-500 mt-1">{tx.fullTime}</div>
+      </div>
+
+      <div className="relative border-t border-dashed border-neutral-700 pt-5 space-y-4">
+        {otherPartyLabel && (
+          <div>
+            <div className="text-xs text-neutral-500 mb-1">{otherPartyLabel}</div>
+            <div className="text-sm font-semibold text-white">@{tx.counterparty}</div>
+            <div className="text-xs text-neutral-400">Tranxact user</div>
+          </div>
+        )}
+        <div>
+          <div className="text-xs text-neutral-500 mb-1">Transaction No.</div>
+          <div className="text-xs font-mono text-neutral-300 break-all">{maskedRef}</div>
+        </div>
+      </div>
+
+      <div className="relative border-t border-dashed border-neutral-700 mt-5 pt-4">
+        <p className="text-[11px] text-neutral-500 leading-relaxed">
+          Tranxact. Send and receive money instantly, get paid with TranxactPay, and convert crypto to naira in seconds.
+        </p>
+      </div>
+    </div>
+  );
+});
+
+function ShareReceiptScreen({ tx, onBack }) {
+  const [busy, setBusy] = useState(''); // '' | 'image' | 'pdf'
+  const [error, setError] = useState('');
+  const cardRef = useRef(null);
+
+  const renderCanvas = async () => {
+    const html2canvas = (await import('html2canvas')).default;
+    return html2canvas(cardRef.current, { backgroundColor: '#111114', scale: 3 });
+  };
+
+  const shareAsImage = async () => {
+    setError('');
+    setBusy('image');
+    try {
+      const canvas = await renderCanvas();
+      canvas.toBlob(async (blob) => {
+        if (!blob) { setError('Could not generate the image'); setBusy(''); return; }
+        const file = new File([blob], `tranxact-receipt-${tx.id.slice(0, 8)}.png`, { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try { await navigator.share({ files: [file], title: 'Tranxact receipt' }); } catch { /* cancelled */ }
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `tranxact-receipt-${tx.id.slice(0, 8)}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        setBusy('');
+      }, 'image/png');
+    } catch (e) {
+      setError('Could not generate the image — make sure html2canvas is installed.');
+      setBusy('');
+    }
+  };
+
+  const shareAsPdf = async () => {
+    setError('');
+    setBusy('pdf');
+    try {
+      const canvas = await renderCanvas();
+      const { jsPDF } = await import('jspdf');
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({ unit: 'px', format: [canvas.width, canvas.height] });
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      const blob = pdf.output('blob');
+      const file = new File([blob], `tranxact-receipt-${tx.id.slice(0, 8)}.pdf`, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'Tranxact receipt' }); } catch { /* cancelled */ }
+      } else {
+        pdf.save(`tranxact-receipt-${tx.id.slice(0, 8)}.pdf`);
+      }
+    } catch (e) {
+      setError('Could not generate the PDF — make sure html2canvas and jspdf are installed.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black overflow-y-auto">
+      <div className="max-w-sm mx-auto px-5 pt-6 pb-10" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))' }}>
+        <BackHeader title="Share Receipt" onBack={onBack} />
+        <div className="flex justify-center mb-6">
+          <ReceiptCard tx={tx} ref={cardRef} />
+        </div>
+        {error && <p className="text-sm text-red-400 text-center mb-4">{error}</p>}
+        <div className="flex items-center justify-center gap-8 border-t border-neutral-900 pt-5">
+          <button onClick={shareAsImage} disabled={!!busy} className="flex items-center gap-2 text-sm text-emerald-400 disabled:opacity-50">
+            {busy === 'image' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+            Share as image
+          </button>
+          <div className="w-px h-5 bg-neutral-800" />
+          <button onClick={shareAsPdf} disabled={!!busy} className="flex items-center gap-2 text-sm text-emerald-400 disabled:opacity-50">
+            {busy === 'pdf' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            Share as PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TransactionDetailModal({ tx, onClose, onSendAgain }) {
+  const [showShare, setShowShare] = useState(false);
   const positive = tx.amount > 0;
   const Icon = tx.icon;
   const isPeer = tx.type === 'send_user' && tx.counterparty;
+  const isBank = tx.type === 'send_bank';
+  const isCrypto = tx.type === 'crypto_deposit' && tx.cryptoAsset;
   const rows = [
     { label: 'Status', value: <span className="capitalize">{tx.status || 'settled'}</span> },
     { label: 'Date & time', value: tx.fullTime },
@@ -582,22 +743,7 @@ function TransactionDetailModal({ tx, onClose }) {
   if (tx.cryptoAsset) rows.splice(1, 0, { label: 'Asset', value: tx.cryptoAsset });
   if (tx.description) rows.push({ label: 'Description', value: tx.description });
 
-  const shareReceipt = async () => {
-    const lines = [
-      `Tranxact receipt`,
-      `${positive ? '+' : '-'}${fmtNaira(tx.amount)}`,
-      tx.title,
-      ...rows.map(r => `${r.label}: ${typeof r.value === 'string' ? r.value : (r.value?.props?.children ?? '')}`),
-    ];
-    const text = lines.join('\n');
-    if (navigator.share) {
-      try { await navigator.share({ title: 'Tranxact receipt', text }); } catch { /* cancelled */ }
-    } else {
-      navigator.clipboard?.writeText(text);
-      setShared(true);
-      setTimeout(() => setShared(false), 1500);
-    }
-  };
+  if (showShare) return <ShareReceiptScreen tx={tx} onBack={() => setShowShare(false)} />;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
@@ -605,13 +751,21 @@ function TransactionDetailModal({ tx, onClose }) {
       <div className="relative w-full sm:max-w-sm bg-neutral-950 border border-neutral-800 rounded-t-3xl sm:rounded-3xl p-6">
         <div className="flex flex-col items-center text-center mb-6">
           {isPeer ? (
-            <UserAvatar username={tx.counterparty} size={48} />
+            <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center">
+              <LogoMark size={22} />
+            </div>
+          ) : isCrypto ? (
+            <CoinIcon symbol={tx.cryptoAsset} size={48} />
+          ) : isBank ? (
+            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
+              <Landmark className="w-5 h-5 text-neutral-300" />
+            </div>
           ) : (
-            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-3">
+            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
               <Icon className="w-5 h-5 text-neutral-300" />
             </div>
           )}
-          <div className={`font-mono text-2xl font-bold mt-3 ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
+          <div className={`font-mono text-2xl font-bold mt-3 ${positive ? 'text-emerald-400' : 'text-white'}`}>
             {positive ? '+' : '-'}{fmtNaira(tx.amount)}
           </div>
           <div className="text-sm text-neutral-500 mt-1">{tx.title}</div>
@@ -624,8 +778,20 @@ function TransactionDetailModal({ tx, onClose }) {
             </div>
           ))}
         </div>
-        <button onClick={shareReceipt} className="w-full mt-4 bg-neutral-900 border border-neutral-800 text-white text-sm font-medium rounded-xl py-3 flex items-center justify-center gap-2 hover:bg-neutral-800 transition">
-          <Share2 className="w-4 h-4" /> {shared ? 'Copied' : 'Share receipt'}
+
+        {isPeer && !positive && onSendAgain && (
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl mt-4 px-4 py-3">
+            <button
+              onClick={() => { onSendAgain(tx.counterparty); onClose(); }}
+              className="w-full flex items-center gap-2 text-sm text-emerald-400"
+            >
+              <ArrowUpFromLine className="w-4 h-4" /> Send again
+            </button>
+          </div>
+        )}
+
+        <button onClick={() => setShowShare(true)} className="w-full mt-4 bg-neutral-900 border border-neutral-800 text-white text-sm font-medium rounded-xl py-3 flex items-center justify-center gap-2 hover:bg-neutral-800 transition">
+          <Share2 className="w-4 h-4" /> Share receipt
         </button>
         <button onClick={onClose} className="w-full mt-3 text-sm text-neutral-500 hover:text-white transition py-2">Close</button>
       </div>
@@ -633,41 +799,39 @@ function TransactionDetailModal({ tx, onClose }) {
   );
 }
 
-function TransactionRow({ tx }) {
+function TransactionRow({ tx, onSendAgain }) {
   const [showDetail, setShowDetail] = useState(false);
   const positive = tx.amount > 0;
-  const Icon = tx.icon;
-  const isPeer = tx.type === 'send_user' && tx.counterparty;
+  // The list itself stays simple — just a direction indicator. The specific
+  // branded icon (Tranxact logo / bank / coin) only shows once someone taps
+  // in to the detail view below.
+  const DirectionIcon = positive ? ArrowDownToLine : ArrowUpFromLine;
   return (
     <>
       <button onClick={() => setShowDetail(true)} className="w-full flex items-center justify-between py-3.5 border-b border-neutral-900 last:border-b-0 text-left hover:bg-neutral-900/40 transition -mx-1 px-1 rounded-lg">
         <div className="flex items-center gap-3">
-          {isPeer ? (
-            <UserAvatar username={tx.counterparty} size={36} />
-          ) : (
-            <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center flex-shrink-0">
-              <Icon className="w-4 h-4 text-neutral-300" />
-            </div>
-          )}
+          <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center flex-shrink-0">
+            <DirectionIcon className={`w-4 h-4 ${positive ? 'text-emerald-400' : 'text-neutral-300'}`} />
+          </div>
           <div>
             <div className="text-sm font-medium">{tx.title}</div>
             <div className="text-xs text-neutral-500">{tx.sub}</div>
           </div>
         </div>
         <div className="text-right">
-          <div className={`font-mono text-sm ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
+          <div className={`font-mono text-sm ${positive ? 'text-emerald-400' : 'text-white'}`}>
             {positive ? '+' : '-'}{fmtNaira(tx.amount)}
           </div>
           <div className="text-xs text-neutral-500">{tx.time}</div>
         </div>
       </button>
-      {showDetail && <TransactionDetailModal tx={tx} onClose={() => setShowDetail(false)} />}
+      {showDetail && <TransactionDetailModal tx={tx} onClose={() => setShowDetail(false)} onSendAgain={onSendAgain} />}
     </>
   );
 }
 
 // ---------- Home ----------
-function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onTranxactPay, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
+function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onSendAgain, onTranxactPay, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -717,7 +881,7 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
           </div>
         ) : (
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
-            {transactions.slice(0, 3).map(tx => <TransactionRow key={tx.id} tx={tx} />)}
+            {transactions.slice(0, 3).map(tx => <TransactionRow key={tx.id} tx={tx} onSendAgain={onSendAgain} />)}
           </div>
         )}
       </div>
@@ -800,7 +964,7 @@ function NotificationsScreen({ onBack }) {
   );
 }
 
-function HistoryScreen({ onBack, transactions = [] }) {
+function HistoryScreen({ onBack, transactions = [], onSendAgain }) {
   const todayKey = new Date().toDateString();
   const yesterdayKey = new Date(Date.now() - 86400000).toDateString();
   const groupLabel = (dateKey) => {
@@ -830,7 +994,7 @@ function HistoryScreen({ onBack, transactions = [] }) {
             <div key={g.key}>
               <h3 className="text-xs font-medium text-neutral-500 mb-2 px-1">{groupLabel(g.key)}</h3>
               <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
-                {g.items.map(tx => <TransactionRow key={tx.id} tx={tx} />)}
+                {g.items.map(tx => <TransactionRow key={tx.id} tx={tx} onSendAgain={onSendAgain} />)}
               </div>
             </div>
           ))}
@@ -968,10 +1132,10 @@ function FundWalletScreen({ onBack, username = '' }) {
 }
 
 // ---------- Send (naira only — Tranxact user or bank account) ----------
-function SendScreen({ onBack, onDone, hasPin }) {
+function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
   const [mode, setMode] = useState('user');
   const [step, setStep] = useState('form');
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(initialUsername);
   const [banks, setBanks] = useState(null); // null = loading, [] = failed/empty
   const [banksError, setBanksError] = useState('');
   const [bankCode, setBankCode] = useState('');
@@ -1085,7 +1249,9 @@ function SendScreen({ onBack, onDone, hasPin }) {
 
         <div className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl p-5 flex flex-col items-center mb-6">
           {mode === 'user' ? (
-            <UserAvatar username={username} size={48} />
+            <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center">
+              <LogoMark size={22} />
+            </div>
           ) : (
             <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
               <Landmark className="w-5 h-5 text-neutral-300" />
@@ -1968,7 +2134,7 @@ function AdminScreen() {
                 {lookupResult.recent_transactions.map((t, i) => (
                   <div key={i} className="flex justify-between text-xs text-neutral-500">
                     <span>{t.type}{t.crypto_asset ? ` (${t.crypto_asset})` : ''}</span>
-                    <span className={Number(t.amount) >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                    <span className={Number(t.amount) >= 0 ? 'text-emerald-400' : 'text-neutral-300'}>
                       {Number(t.amount) >= 0 ? '+' : ''}{fmtNaira(t.amount)}
                     </span>
                   </div>
@@ -3734,6 +3900,7 @@ function MobileAppRoot() {
   const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | forgotSent | welcome | app
   const [tab, setTab] = useState('home');
   const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | notifications
+  const [sendAgainUsername, setSendAgainUsername] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const [profileView, setProfileView] = useState('main'); // main | referrals | earnings | leaderboard | support | username | security | settings | account
   const [balanceVisible, setBalanceVisible] = useState(true);
@@ -3831,6 +3998,7 @@ function MobileAppRoot() {
           onFund={() => setHomeView('fund')}
           onReceive={() => setHomeView('receive')}
           onSend={() => setHomeView('send')}
+          onSendAgain={(username) => { setSendAgainUsername(username); setHomeView('send'); }}
           onTranxactPay={() => setTpOpen(true)}
           onSeeAll={() => setHomeView('history')}
           onOpenNotifications={() => setHomeView('notifications')}
@@ -3849,12 +4017,19 @@ function MobileAppRoot() {
       {tab === 'home' && homeView === 'receive' && <ReceiveScreen onBack={() => setHomeView('main')} />}
       {tab === 'home' && homeView === 'send' && (
         <SendScreen
-          onBack={() => setHomeView('main')}
-          onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
+          onBack={() => { setSendAgainUsername(''); setHomeView('main'); }}
+          onDone={() => { if (profile?.id) loadUserData(profile.id); setSendAgainUsername(''); setHomeView('main'); }}
           hasPin={!!profile?.pin_hash}
+          initialUsername={sendAgainUsername}
         />
       )}
-      {tab === 'home' && homeView === 'history' && <HistoryScreen onBack={() => setHomeView('main')} transactions={transactions} />}
+      {tab === 'home' && homeView === 'history' && (
+        <HistoryScreen
+          onBack={() => setHomeView('main')}
+          transactions={transactions}
+          onSendAgain={(username) => { setSendAgainUsername(username); setHomeView('send'); }}
+        />
+      )}
 
       {tab === 'rates' && <RatesScreen />}
       {tab === 'crypto' && <CryptoScreen />}
