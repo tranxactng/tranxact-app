@@ -10,8 +10,10 @@ import {
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
+  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
+  updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
@@ -25,7 +27,9 @@ const ASSETS = [
   { symbol: 'USDC', name: 'USD Coin', network: 'ERC20', address: '0x71C7656EC7ab88b098defB751B7401B4B2a1234', price: 1550.2, change: 0.01 },
   { symbol: 'BTC', name: 'Bitcoin', network: 'Bitcoin', address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p8x9z2mk4', price: 150775000, change: 2.4 },
   { symbol: 'ETH', name: 'Ethereum', network: 'ERC20', address: '0x71C7656EC7ab88b098defB751B7401B4B2a1234', price: 5394000, change: -1.2 },
+  { symbol: 'BNB', name: 'BNB', network: 'BEP20', address: '0x71C7656EC7ab88b098defB751B7401B4B2a1234', price: 961000, change: 1.1 },
   { symbol: 'SOL', name: 'Solana', network: 'Solana', address: '7xKXtg2CW3ed1qUFysrDDpQ3merWaK4Q3zJvyPq3m', price: 332475, change: 5.1 },
+  { symbol: 'TRX', name: 'TRON', network: 'TRC20', address: 'TXk9Qm2vD8yZp4Rj7Ln3fQ2xVh5tYc9Bwe', price: 434, change: 0.5 },
 ];
 
 const BILLS = [
@@ -63,14 +67,14 @@ function mapTransaction(row) {
   const pending = row.status === 'pending';
   const createdDate = new Date(normalizeTimestamp(row.created_at));
   const validDate = !isNaN(createdDate.getTime());
-  // Always include the time, not just the date — two transactions on the same
-  // day both showing "17 Aug" were indistinguishable. Today's entries show
-  // time only (the date is implied); older entries show date + time together.
+  // Two transactions on the same day both showing "17 Aug" are indistinguishable
+  // in the list — show the actual time for anything from today, and fall back
+  // to a date for older entries, so the list itself carries real ordering info.
   const isToday = validDate && createdDate.toDateString() === new Date().toDateString();
   const listTime = validDate
     ? (isToday
         ? createdDate.toLocaleTimeString('en-NG', { hour: 'numeric', minute: '2-digit' })
-        : createdDate.toLocaleString('en-NG', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))
+        : `${createdDate.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}, ${createdDate.toLocaleTimeString('en-NG', { hour: 'numeric', minute: '2-digit' })}`)
     : '';
   return {
     id: row.id,
@@ -107,6 +111,54 @@ const fmtNaira = (n) =>
   `₦${Math.abs(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // ---------- Small shared UI ----------
+// High error-correction QR (ecc=H, ~30% recoverable) with the Tranxact logo
+// layered on top via CSS — not baked into the QR image itself. Keeps the logo
+// small (~18% of the code's width) and centered, which is the safest spot:
+// scanners rely most on the corner finder patterns, so covering the middle
+// stays well inside what H-level correction can reconstruct.
+function BrandedQR({ data, size = 200 }) {
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(data)}&ecc=H`;
+  const logoSize = Math.round(size * 0.18);
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <img src={qrUrl} alt="QR code" style={{ width: size, height: size, borderRadius: 12 }} />
+      <div
+        style={{
+          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          width: logoSize, height: logoSize, background: '#fff', borderRadius: 8,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3,
+          boxShadow: '0 0 0 4px #fff',
+        }}
+      >
+        <img src="/icon-192.png" alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 4 }} />
+      </div>
+    </div>
+  );
+}
+
+// Real crypto icons from a well-established, actively-maintained public icon
+// set (spothq/cryptocurrency-icons, served via jsDelivr). Falls back to the
+// old letter badge if a specific icon fails to load — never shows a broken image.
+function CoinIcon({ symbol, size = 36 }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center font-mono text-xs" style={{ width: size, height: size }}>
+        {symbol.slice(0, 1)}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/${symbol.toLowerCase()}.svg`}
+      alt={symbol}
+      onError={() => setFailed(true)}
+      className="rounded-full"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
 function PrimaryButton({ children, onClick, className = '', type = 'button', disabled = false }) {
   return (
     <button
@@ -476,13 +528,13 @@ function ActionButton({ label, sub, icon: Icon, onClick }) {
   );
 }
 
-function ServiceTile({ label, icon: Icon, light = false }) {
+function ServiceTile({ label, icon: Icon }) {
   return (
-    <button className={`flex flex-col items-center gap-2 rounded-2xl py-4 transition active:scale-[0.98] ${light ? 'bg-white border border-neutral-200 hover:border-neutral-300' : 'bg-neutral-950 border border-neutral-800 hover:bg-neutral-900'}`}>
-      <div className={`w-9 h-9 rounded-full flex items-center justify-center ${light ? 'bg-neutral-100 border border-neutral-200' : 'bg-neutral-900 border border-neutral-800'}`}>
-        <Icon className={`w-4 h-4 ${light ? 'text-neutral-700' : ''}`} />
+    <button className="flex flex-col items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-2xl py-4 hover:bg-neutral-900 transition active:scale-[0.98]">
+      <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
+        <Icon className="w-4 h-4" />
       </div>
-      <span className={`text-xs ${light ? 'text-neutral-600' : 'text-neutral-400'}`}>{label}</span>
+      <span className="text-xs text-neutral-400">{label}</span>
     </button>
   );
 }
@@ -526,34 +578,27 @@ function TransactionDetailModal({ tx, onClose }) {
   );
 }
 
-function TransactionRow({ tx, light = false }) {
+function TransactionRow({ tx }) {
   const [showDetail, setShowDetail] = useState(false);
   const positive = tx.amount > 0;
   const Icon = tx.icon;
   return (
     <>
-      <button
-        onClick={() => setShowDetail(true)}
-        className={`w-full flex items-center justify-between py-3.5 text-left transition -mx-1 px-1 rounded-lg last:border-b-0 ${
-          light
-            ? 'border-b border-neutral-200 hover:bg-neutral-50'
-            : 'border-b border-neutral-900 hover:bg-neutral-900/40'
-        }`}
-      >
+      <button onClick={() => setShowDetail(true)} className="w-full flex items-center justify-between py-3.5 border-b border-neutral-900 last:border-b-0 text-left hover:bg-neutral-900/40 transition -mx-1 px-1 rounded-lg">
         <div className="flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${light ? 'bg-neutral-100 border border-neutral-200' : 'bg-neutral-900 border border-neutral-800'}`}>
-            <Icon className={`w-4 h-4 ${light ? 'text-neutral-600' : 'text-neutral-300'}`} />
+          <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center flex-shrink-0">
+            <Icon className="w-4 h-4 text-neutral-300" />
           </div>
           <div>
-            <div className={`text-sm font-medium ${light ? 'text-neutral-900' : ''}`}>{tx.title}</div>
-            <div className={`text-xs ${light ? 'text-neutral-500' : 'text-neutral-500'}`}>{tx.sub}</div>
+            <div className="text-sm font-medium">{tx.title}</div>
+            <div className="text-xs text-neutral-500">{tx.sub}</div>
           </div>
         </div>
         <div className="text-right">
-          <div className={`font-mono text-sm ${positive ? 'text-emerald-500' : light ? 'text-neutral-900' : 'text-red-400'}`}>
+          <div className={`font-mono text-sm ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
             {positive ? '+' : '-'}{fmtNaira(tx.amount)}
           </div>
-          <div className={`text-xs ${light ? 'text-neutral-500' : 'text-neutral-500'}`}>{tx.time}</div>
+          <div className="text-xs text-neutral-500">{tx.time}</div>
         </div>
       </button>
       {showDetail && <TransactionDetailModal tx={tx} onClose={() => setShowDetail(false)} />}
@@ -564,65 +609,59 @@ function TransactionRow({ tx, light = false }) {
 // ---------- Home ----------
 function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onTranxactPay, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
   return (
-    <div className="flex flex-col">
-      {/* Dark hero — greeting, balance, quick actions */}
-      <div className="space-y-6 pb-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-xl font-bold">Hi, {displayName} 👋</h1>
-            <p className="text-neutral-500 text-sm">Welcome back</p>
-          </div>
-          <button onClick={onOpenNotifications} className="relative w-10 h-10 rounded-full bg-neutral-950 border border-neutral-800 flex items-center justify-center hover:bg-neutral-900 transition">
-            <Bell className="w-4 h-4" />
-            {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-400 text-black text-[10px] font-bold flex items-center justify-center">
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            )}
-          </button>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold">Hi, {displayName} 👋</h1>
+          <p className="text-neutral-500 text-sm">Welcome back</p>
         </div>
+        <button onClick={onOpenNotifications} className="relative w-10 h-10 rounded-full bg-neutral-950 border border-neutral-800 flex items-center justify-center hover:bg-neutral-900 transition">
+          <Bell className="w-4 h-4" />
+          {unreadCount > 0 && (
+            <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-400 text-black text-[10px] font-bold flex items-center justify-center">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
+        </button>
+      </div>
 
-        <BalanceCard visible={balanceVisible} onToggle={toggleBalance} onFund={onFund} balance={balance} />
+      <BalanceCard visible={balanceVisible} onToggle={toggleBalance} onFund={onFund} balance={balance} />
 
-        <div className="grid grid-cols-3 gap-3">
-          <ActionButton label="Receive" sub="Crypto only" icon={ArrowDownToLine} onClick={onReceive} />
-          <ActionButton label="Send" sub="To user or bank" icon={ArrowUpFromLine} onClick={onSend} />
-          <ActionButton label="TranxactPay" sub="Payment link" icon={Link2} onClick={onTranxactPay} />
+      <div className="grid grid-cols-3 gap-3">
+        <ActionButton label="Receive" sub="Crypto only" icon={ArrowDownToLine} onClick={onReceive} />
+        <ActionButton label="Send" sub="To user or bank" icon={ArrowUpFromLine} onClick={onSend} />
+        <ActionButton label="TranxactPay" sub="Payment link" icon={Link2} onClick={onTranxactPay} />
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">Pay Bills &amp; Services</h2>
+          <button className="text-xs text-neutral-500 hover:text-white transition">See all</button>
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          {BILLS.map(b => <ServiceTile key={b.label} label={b.label} icon={b.icon} />)}
         </div>
       </div>
 
-      {/* Light body — bleeds full-width past the shell's padding and extends
-          behind the fixed bottom nav, matching the reference two-tone layout. */}
-      <div className="-mx-5 sm:-mx-8 -mb-28 md:-mb-8 px-5 sm:px-8 pt-6 pb-32 md:pb-8 bg-neutral-100 rounded-t-3xl text-neutral-900 space-y-6">
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-neutral-900">Pay Bills &amp; Services</h2>
-            <button className="text-xs text-neutral-500 hover:text-neutral-900 transition">See all</button>
-          </div>
-          <div className="grid grid-cols-5 gap-2">
-            {BILLS.map(b => <ServiceTile key={b.label} label={b.label} icon={b.icon} light />)}
-          </div>
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <h2 className="text-sm font-semibold text-neutral-900">Recent Transactions</h2>
-            {transactions.length > 0 && (
-              <button onClick={onSeeAll} className="text-xs text-neutral-500 hover:text-neutral-900 transition">See all</button>
-            )}
-          </div>
-          {transactions.length === 0 ? (
-            <div className="bg-white border border-neutral-200 rounded-2xl py-8 text-center">
-              <p className="text-sm text-neutral-500">No transactions yet</p>
-              <p className="text-xs text-neutral-400 mt-1">Fund your wallet or receive crypto to get started</p>
-            </div>
-          ) : (
-            <div className="bg-white border border-neutral-200 rounded-2xl px-4">
-              {transactions.slice(0, 3).map(tx => <TransactionRow key={tx.id} tx={tx} light />)}
-            </div>
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-sm font-semibold">Recent Transactions</h2>
+          {transactions.length > 0 && (
+            <button onClick={onSeeAll} className="text-xs text-neutral-500 hover:text-white transition">See all</button>
           )}
         </div>
+        {transactions.length === 0 ? (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl py-8 text-center">
+            <p className="text-sm text-neutral-500">No transactions yet</p>
+            <p className="text-xs text-neutral-600 mt-1">Fund your wallet or receive crypto to get started</p>
+          </div>
+        ) : (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
+            {transactions.slice(0, 3).map(tx => <TransactionRow key={tx.id} tx={tx} />)}
+          </div>
+        )}
       </div>
+
     </div>
   );
 }
@@ -766,8 +805,8 @@ function CryptoReceivePanel() {
             <p className="text-sm text-red-400 py-6 text-center">{error}</p>
           ) : (
             <>
-              <div className="w-40 h-40 bg-white rounded-2xl flex items-center justify-center mb-5">
-                <QrCode className="w-24 h-24 text-black" />
+              <div className="w-40 h-40 bg-white rounded-2xl flex items-center justify-center mb-5 p-3">
+                <BrandedQR data={address} size={136} />
               </div>
               <div className="text-xs text-neutral-500 mb-2">{selected.name} · {selected.network} network</div>
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 w-full text-center font-mono text-xs text-neutral-300 break-all mb-4">
@@ -805,9 +844,7 @@ function CryptoReceivePanel() {
           className={`w-full flex items-center justify-between px-4 py-4 transition ${a.is_receivable ? 'hover:bg-neutral-900' : 'opacity-40 cursor-not-allowed'}`}
         >
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center font-mono text-xs">
-              {a.symbol.slice(0, 1)}
-            </div>
+            <CoinIcon symbol={a.symbol} size={36} />
             <div className="text-left">
               <div className="text-sm font-medium">{a.name}</div>
               <div className="text-xs text-neutral-500">{a.symbol}</div>
@@ -1154,7 +1191,7 @@ function TranxactPayScreen({ onClose, username }) {
 
         {showingQr && (
           <div className="flex flex-col items-center bg-neutral-950 border border-neutral-800 rounded-lg p-4 mb-3">
-            <img src={qrUrl} alt={`${link.title} QR code`} className="w-40 h-40 rounded-lg mb-3 bg-white p-2" />
+            <div className="bg-white rounded-lg p-2 mb-3"><BrandedQR data={url} size={144} /></div>
             <div className="text-violet-400 text-xs font-mono break-all text-center">{url.replace('https://', '')}</div>
           </div>
         )}
@@ -1233,11 +1270,7 @@ function TranxactPayScreen({ onClose, username }) {
 
             {justCreated && (
               <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4 text-center">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(justCreated.url)}`}
-                  alt="Payment link QR code"
-                  className="w-28 h-28 mx-auto rounded-lg mb-3 bg-white p-1.5"
-                />
+                <div className="bg-white rounded-lg p-1.5 mb-3 inline-block"><BrandedQR data={justCreated.url} size={112} /></div>
                 <div className="text-violet-300 text-xs font-mono break-all mb-3">{justCreated.url}</div>
                 <div className="grid grid-cols-2 gap-2">
                   <GhostButton onClick={() => copy(justCreated.url, 'new')}>
@@ -1276,11 +1309,7 @@ function TranxactPayScreen({ onClose, username }) {
               </div>
             ) : (
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 text-center">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent('https://app.tranxact.co/pay/' + tipLink.slug)}`}
-                  alt="Tip link QR code"
-                  className="w-36 h-36 mx-auto rounded-lg mb-4 bg-white p-2"
-                />
+                <div className="bg-white rounded-lg p-2 mb-4 inline-block"><BrandedQR data={`https://app.tranxact.co/pay/${tipLink.slug}`} size={128} /></div>
                 <div className="text-violet-400 text-xs font-mono break-all mb-4">{`app.tranxact.co/pay/${tipLink.slug}`}</div>
                 <div className="grid grid-cols-2 gap-2">
                   <GhostButton onClick={() => copy(`https://app.tranxact.co/pay/${tipLink.slug}`, 'tip')}>
@@ -1400,7 +1429,7 @@ function RatesScreen() {
             return (
               <div key={r.coin} className="flex items-center justify-between px-4 py-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center font-mono text-xs">{r.coin.slice(0, 1)}</div>
+                  <CoinIcon symbol={r.coin} size={36} />
                   <div>
                     <div className="text-sm font-medium">{r.coin}</div>
                     <div className="text-xs text-neutral-500">{asset?.name || r.coin}</div>
@@ -1541,12 +1570,61 @@ function AdminScreen() {
   const [withdrawalActionLoading, setWithdrawalActionLoading] = useState(null);
   const [salesLeads, setSalesLeads] = useState(null);
   const [leadActionLoading, setLeadActionLoading] = useState(null);
+  const [currentRates, setCurrentRates] = useState(null);
+  const [baseRateInput, setBaseRateInput] = useState('');
+  const [rateSaving, setRateSaving] = useState(false);
+  const [rateError, setRateError] = useState('');
+  const [rateSaved, setRateSaved] = useState(false);
+  const [spreadInputs, setSpreadInputs] = useState({});
+  const [spreadSaving, setSpreadSaving] = useState(null);
+  const [spreadError, setSpreadError] = useState('');
 
   const loadStats = async () => {
     try {
       setStats(await adminGetOverviewStats());
     } catch {
       setStats(null);
+    }
+  };
+
+  const loadCurrentRates = async () => {
+    try {
+      const res = await adminGetCurrentRates();
+      setCurrentRates(res);
+      setBaseRateInput(res.base_rate != null ? String(res.base_rate) : '');
+      const initialSpreads = {};
+      (res.assets || []).forEach(a => { initialSpreads[a.symbol] = String(a.spread_percentage); });
+      setSpreadInputs(initialSpreads);
+    } catch {
+      setCurrentRates(null);
+    }
+  };
+
+  const saveBaseRate = async () => {
+    setRateError('');
+    setRateSaved(false);
+    setRateSaving(true);
+    try {
+      await adminUpdateBaseRate(Number(baseRateInput));
+      setRateSaved(true);
+      loadCurrentRates();
+    } catch (e) {
+      setRateError(e.message);
+    } finally {
+      setRateSaving(false);
+    }
+  };
+
+  const saveSpread = async (symbol) => {
+    setSpreadError('');
+    setSpreadSaving(symbol);
+    try {
+      await adminUpdateSpread(symbol, Number(spreadInputs[symbol]));
+      loadCurrentRates();
+    } catch (e) {
+      setSpreadError(e.message);
+    } finally {
+      setSpreadSaving(null);
     }
   };
 
@@ -1627,6 +1705,7 @@ function AdminScreen() {
     loadStats();
     loadWithdrawals();
     loadSalesLeads();
+    loadCurrentRates();
     supabase.rpc('get_public_rates').then(({ data }) => setRates(data || []));
   }, []);
 
@@ -2030,6 +2109,69 @@ function AdminScreen() {
       </div>
 
       <div>
+        <h2 className="text-sm font-semibold mb-3">Rate Settings</h2>
+        {currentRates === null ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+        ) : (
+          <>
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-3">
+              <div className="text-xs text-neutral-500 mb-2">USD/NGN base rate</div>
+              <div className="flex items-center gap-2">
+                <span className="text-neutral-500">₦</span>
+                <input
+                  type="number"
+                  value={baseRateInput}
+                  onChange={e => setBaseRateInput(e.target.value)}
+                  className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
+                />
+                <button onClick={saveBaseRate} disabled={rateSaving} className="text-xs bg-violet-600 rounded-lg px-3 py-2 font-semibold disabled:opacity-50 flex-shrink-0">
+                  {rateSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+                </button>
+              </div>
+              {rateSaved && <p className="text-xs text-emerald-400 mt-2">Saved.</p>}
+              {rateError && <p className="text-xs text-red-400 mt-2">{rateError}</p>}
+              {currentRates.last_manual_update_at && (
+                <p className="text-[11px] text-neutral-600 mt-2">
+                  Last manually set {new Date(normalizeTimestamp(currentRates.last_manual_update_at)).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}
+                </p>
+              )}
+            </div>
+
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+              {(currentRates.assets || []).map(a => (
+                <div key={a.symbol} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <CoinIcon symbol={a.symbol} size={28} />
+                    <div>
+                      <div className="text-sm font-medium">{a.symbol}</div>
+                      <div className="text-[11px] text-neutral-600">Spread %</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={spreadInputs[a.symbol] ?? ''}
+                      onChange={e => setSpreadInputs(prev => ({ ...prev, [a.symbol]: e.target.value }))}
+                      className="w-20 bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-1.5 text-sm text-right outline-none focus:border-violet-500"
+                    />
+                    <button
+                      onClick={() => saveSpread(a.symbol)}
+                      disabled={spreadSaving === a.symbol}
+                      className="text-xs bg-neutral-800 rounded-lg px-2.5 py-1.5 disabled:opacity-50"
+                    >
+                      {spreadSaving === a.symbol ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {spreadError && <p className="text-xs text-red-400 mt-2">{spreadError}</p>}
+          </>
+        )}
+      </div>
+
+      <div>
         <h2 className="text-sm font-semibold mb-3">Recent Settlements</h2>
         {settlements === null ? (
           <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
@@ -2063,8 +2205,12 @@ function AdminScreen() {
   );
 }
 
-function AccountDetailsScreen({ onBack, profile }) {
+function AccountDetailsScreen({ onBack, profile, onUpdated }) {
   const [email, setEmail] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(profile?.full_name || '');
+  const [saving, setSaving] = useState(false);
+  const [nameError, setNameError] = useState('');
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data?.user?.email || ''));
@@ -2074,8 +2220,21 @@ function AccountDetailsScreen({ onBack, profile }) {
     ? new Date(normalizeTimestamp(profile.created_at)).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
     : '—';
 
+  const saveName = async () => {
+    setNameError('');
+    setSaving(true);
+    try {
+      await updateFullName(nameInput);
+      setEditingName(false);
+      onUpdated?.();
+    } catch (e) {
+      setNameError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const rows = [
-    { label: 'Full name', value: profile?.full_name || '—' },
     { label: 'Username', value: profile?.username ? `@${profile.username}` : '—' },
     { label: 'Email', value: email || '—' },
     { label: 'Member since', value: memberSince },
@@ -2085,6 +2244,32 @@ function AccountDetailsScreen({ onBack, profile }) {
     <div>
       <BackHeader title="Account Details" onBack={onBack} />
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+        <div className="px-4 py-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-neutral-500">Full name</span>
+            {!editingName && (
+              <button onClick={() => { setNameInput(profile?.full_name || ''); setEditingName(true); }} className="flex items-center gap-2">
+                <span className="text-sm font-medium">{profile?.full_name || 'Add your name'}</span>
+                <span className="text-xs text-violet-400">{profile?.full_name ? 'Edit' : 'Add'}</span>
+              </button>
+            )}
+          </div>
+          {editingName && (
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={nameInput}
+                onChange={e => setNameInput(e.target.value)}
+                placeholder="Your full name"
+                className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
+              />
+              <button onClick={saveName} disabled={saving} className="text-xs bg-violet-600 rounded-lg px-3 py-2 font-semibold disabled:opacity-50">
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+              </button>
+              <button onClick={() => setEditingName(false)} className="text-xs text-neutral-500 px-2">Cancel</button>
+            </div>
+          )}
+          {nameError && <p className="text-xs text-red-400 mt-2">{nameError}</p>}
+        </div>
         {rows.map(r => (
           <div key={r.label} className="flex items-center justify-between px-4 py-4">
             <span className="text-sm text-neutral-500">{r.label}</span>
@@ -2281,7 +2466,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
 
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
-const CRYPTO_NETWORK_LABEL = { BTC: 'Bitcoin network', ETH: 'Ethereum network', USDT: 'TRC20 (Tron) network', USDC: 'ERC-20 (Ethereum) network', SOL: 'Solana network' };
+const CRYPTO_NETWORK_LABEL = { BTC: 'Bitcoin network', ETH: 'Ethereum network', USDT: 'TRC20 (Tron) network', USDC: 'ERC-20 (Ethereum) network', SOL: 'Solana network', BNB: 'BEP-20 (BNB Smart Chain) network', TRX: 'TRC20 (Tron) network' };
 
 function CheckoutPage({ slug }) {
   const [link, setLink] = useState(undefined); // undefined = loading, null = not found
@@ -2498,11 +2683,7 @@ function CheckoutPage({ slug }) {
                   </div>
 
                   <div className="flex flex-col items-center bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(link.crypto_addresses[cryptoAsset])}`}
-                      alt={`${cryptoAsset} address QR code`}
-                      className="w-36 h-36 rounded-lg mb-3 bg-white p-2"
-                    />
+                    <div className="bg-white rounded-lg p-2 mb-3"><BrandedQR data={link.crypto_addresses[cryptoAsset]} size={128} /></div>
                     <button onClick={() => copy(link.crypto_addresses[cryptoAsset], 'crypto')} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5">
                       <span className="font-mono text-xs text-neutral-300 break-all text-left">{link.crypto_addresses[cryptoAsset]}</span>
                       {copied === 'crypto' ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 ml-2" /> : <Copy className="w-4 h-4 text-neutral-500 flex-shrink-0 ml-2" />}
@@ -2567,7 +2748,7 @@ function VerificationModal({ onClose }) {
 function SupportScreen({ onBack }) {
   const faqs = [
     { q: 'How do I fund my wallet?', a: 'Tap Fund Wallet on Home and send any supported crypto — it converts to naira automatically once confirmed.' },
-    { q: 'Which crypto coins are supported?', a: 'ETH, BTC, USDT (TRC20), USDC (ERC-20), and SOL. Received crypto converts to naira automatically.' },
+    { q: 'Which crypto coins are supported?', a: 'ETH, BTC, BNB (BEP-20), USDT (TRC20), USDC (ERC-20), TRX, and SOL. Received crypto converts to naira automatically.' },
     { q: 'How long does a deposit take to reflect?', a: 'Usually a few minutes after the transfer or deposit is confirmed.' },
     { q: 'Is sending to a Tranxact user free?', a: 'Yes — transfers between Tranxact users have no fee.' },
   ];
@@ -2696,7 +2877,7 @@ function ReferralsScreen({ onBack, onEarnings, onLeaderboard, username, userId }
         </button>
       </div>
       <p className="text-xs text-neutral-600 mt-6 text-center">
-        You earn 25% of the crypto funding fee every time someone you referred receives crypto.
+        You earn 25% of the crypto funding fee every time someone you referred receives crypto — and they get ₦1,000 on their first deposit of $25 or more.
       </p>
     </div>
   );
@@ -3598,7 +3779,7 @@ function MobileAppRoot() {
         <LeaderboardScreen onBack={() => setProfileView('referrals')} myUsername={profile?.username || ''} />
       )}
       {tab === 'profile' && profileView === 'support' && <SupportScreen onBack={() => setProfileView('main')} />}
-      {tab === 'profile' && profileView === 'account' && <AccountDetailsScreen onBack={() => setProfileView('main')} profile={profile} />}
+      {tab === 'profile' && profileView === 'account' && <AccountDetailsScreen onBack={() => setProfileView('main')} profile={profile} onUpdated={() => { if (profile?.id) loadUserData(profile.id); }} />}
       {tab === 'profile' && profileView === 'username' && (
         <UsernameScreen
           onBack={() => setProfileView('main')}
