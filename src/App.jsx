@@ -649,7 +649,27 @@ function ShareReceiptScreen({ tx, onBack }) {
   const [error, setError] = useState('');
   const cardRef = useRef(null);
 
+  // html2canvas has a longstanding, well-documented issue with base64 data-URI
+  // images: it can capture the DOM before the browser has actually finished
+  // decoding/painting the image, leaving it blank in the output — even though
+  // the image itself is completely valid. Explicitly waiting for every image
+  // inside the card to confirm loaded (not just present) before capturing is
+  // the reliable fix, rather than trusting html2canvas's own image handling.
+  const waitForImages = (container) => {
+    const imgs = Array.from(container.querySelectorAll('img'));
+    return Promise.all(
+      imgs.map((img) => {
+        if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+        return new Promise((resolve) => {
+          img.addEventListener('load', resolve, { once: true });
+          img.addEventListener('error', resolve, { once: true }); // don't hang forever on a bad image
+        });
+      })
+    );
+  };
+
   const renderCanvas = async () => {
+    await waitForImages(cardRef.current);
     const html2canvas = (await import('html2canvas')).default;
     return html2canvas(cardRef.current, { backgroundColor: '#111114', scale: 3 });
   };
