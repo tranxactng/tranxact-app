@@ -208,6 +208,31 @@ export async function changeUsername(newUsername) {
   return true;
 }
 
+export async function adminGetCurrentRates() {
+  return callAdminFunction('admin-manage-rates', { action: 'get_current' });
+}
+
+export async function adminUpdateBaseRate(baseRate) {
+  return callAdminFunction('admin-manage-rates', { action: 'update_base_rate', base_rate: baseRate });
+}
+
+export async function adminUpdateSpread(symbol, spreadPercentage) {
+  return callAdminFunction('admin-manage-rates', { action: 'update_spread', symbol, spread_percentage: spreadPercentage });
+}
+
+// Every existing account has a null full_name because the signup trigger
+// never read it from metadata (now fixed for new signups) — this is how an
+// existing account fills theirs in.
+export async function updateFullName(newName) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const trimmed = newName.trim();
+  if (!trimmed) throw new Error('Name cannot be empty');
+  const { error } = await supabase.from('profiles').update({ full_name: trimmed }).eq('id', user.id);
+  if (error) throw new Error(error.message);
+  return true;
+}
+
 export async function updatePassword(newPassword) {
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) throw new Error(error.message);
