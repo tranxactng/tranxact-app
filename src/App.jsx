@@ -670,8 +670,16 @@ function ShareReceiptScreen({ tx, onBack }) {
 
   const renderCanvas = async () => {
     await waitForImages(cardRef.current);
+    // img.complete confirms the image is decoded, but not necessarily that
+    // the browser has actually painted this frame yet — waiting two animation
+    // frames forces a real paint to happen before html2canvas takes its snapshot.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const html2canvas = (await import('html2canvas')).default;
-    return html2canvas(cardRef.current, { backgroundColor: '#111114', scale: 3 });
+    // html2canvas's own FAQ confirms it runs an internal taint-safety check
+    // on every image before drawing it — without allowTaint explicitly set,
+    // an image it's not fully certain about gets silently skipped, not
+    // errored. Combined with a generous imageTimeout as a second safety net.
+    return html2canvas(cardRef.current, { backgroundColor: '#111114', scale: 3, allowTaint: true, imageTimeout: 15000, useCORS: true });
   };
 
   const shareAsImage = async () => {
