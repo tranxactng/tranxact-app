@@ -76,6 +76,12 @@ function mapTransaction(row) {
         ? createdDate.toLocaleTimeString('en-NG', { hour: 'numeric', minute: '2-digit' })
         : `${createdDate.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}, ${createdDate.toLocaleTimeString('en-NG', { hour: 'numeric', minute: '2-digit' })}`)
     : '';
+  // Description is only shown to the user when it's genuinely user-facing content
+  // (a TranxactPay note, a bill payment label, an admin's settlement note on a
+  // deposit). For peer transfers it's always redundant system boilerplate, and
+  // for anything flagged is_correction it may be an internal/admin-only note —
+  // never surface either of those as if the user wrote them.
+  const showDescription = !row.is_correction && !['send_user', 'send_bank', 'referral'].includes(row.type);
   return {
     id: row.id,
     type: row.type,
@@ -83,11 +89,12 @@ function mapTransaction(row) {
     title: meta.title,
     sub: pending ? 'Pending settlement' : (row.counterparty ? `@${row.counterparty}` : row.description || ''),
     counterparty: row.counterparty,
-    description: row.description,
+    description: showDescription ? row.description : null,
     cryptoAsset: row.crypto_asset,
     amount: row.amount_ngn != null ? Number(row.amount_ngn) : 0,
     time: listTime,
     fullTime: validDate ? createdDate.toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' }) : '',
+    dateKey: validDate ? createdDate.toDateString() : '',
     icon: meta.icon,
   };
 }
@@ -109,6 +116,28 @@ const NAIRA_FUNDING_FEE_FLAT = 100;
 
 const fmtNaira = (n) =>
   `₦${Math.abs(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Deterministic color per username so the same person always gets the same
+// avatar color across the app, without storing anything extra.
+const AVATAR_COLORS = ['#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444', '#14B8A6', '#F97316'];
+function avatarColor(name = '') {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+function initials(name = '') {
+  return (name || '?').slice(0, 2).toUpperCase();
+}
+function UserAvatar({ username, size = 36 }) {
+  return (
+    <div
+      className="rounded-full flex items-center justify-center flex-shrink-0 font-semibold text-white"
+      style={{ width: size, height: size, backgroundColor: avatarColor(username), fontSize: size * 0.38 }}
+    >
+      {initials(username)}
+    </div>
+  );
+}
 
 // ---------- Small shared UI ----------
 // High error-correction QR (ecc=H, ~30% recoverable) with the Tranxact logo
@@ -387,7 +416,7 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   }
 
   return (
-    <AuthShell title="Create your account" subtitle="Money, simplified — set up your wallet in a minute." brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
+    <AuthShell title="Create your account" subtitle="Money, simplified. Set up your wallet in a minute." brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <Field label="Full name" icon={User} type="text" placeholder="David Adeyemi" required value={fullName} onChange={e => setFullName(e.target.value)} />
         <Field label="Username" icon={User} type="text" placeholder="david" required value={username} onChange={e => setUsername(e.target.value)} />
@@ -540,8 +569,10 @@ function ServiceTile({ label, icon: Icon }) {
 }
 
 function TransactionDetailModal({ tx, onClose }) {
+  const [shared, setShared] = useState(false);
   const positive = tx.amount > 0;
   const Icon = tx.icon;
+  const isPeer = tx.type === 'send_user' && tx.counterparty;
   const rows = [
     { label: 'Status', value: <span className="capitalize">{tx.status || 'settled'}</span> },
     { label: 'Date & time', value: tx.fullTime },
@@ -551,15 +582,36 @@ function TransactionDetailModal({ tx, onClose }) {
   if (tx.cryptoAsset) rows.splice(1, 0, { label: 'Asset', value: tx.cryptoAsset });
   if (tx.description) rows.push({ label: 'Description', value: tx.description });
 
+  const shareReceipt = async () => {
+    const lines = [
+      `Tranxact receipt`,
+      `${positive ? '+' : '-'}${fmtNaira(tx.amount)}`,
+      tx.title,
+      ...rows.map(r => `${r.label}: ${typeof r.value === 'string' ? r.value : (r.value?.props?.children ?? '')}`),
+    ];
+    const text = lines.join('\n');
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Tranxact receipt', text }); } catch { /* cancelled */ }
+    } else {
+      navigator.clipboard?.writeText(text);
+      setShared(true);
+      setTimeout(() => setShared(false), 1500);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full sm:max-w-sm bg-neutral-950 border border-neutral-800 rounded-t-3xl sm:rounded-3xl p-6">
         <div className="flex flex-col items-center text-center mb-6">
-          <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-3">
-            <Icon className="w-5 h-5 text-neutral-300" />
-          </div>
-          <div className={`font-mono text-2xl font-bold ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
+          {isPeer ? (
+            <UserAvatar username={tx.counterparty} size={48} />
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-3">
+              <Icon className="w-5 h-5 text-neutral-300" />
+            </div>
+          )}
+          <div className={`font-mono text-2xl font-bold mt-3 ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
             {positive ? '+' : '-'}{fmtNaira(tx.amount)}
           </div>
           <div className="text-sm text-neutral-500 mt-1">{tx.title}</div>
@@ -572,7 +624,10 @@ function TransactionDetailModal({ tx, onClose }) {
             </div>
           ))}
         </div>
-        <button onClick={onClose} className="w-full mt-5 text-sm text-neutral-500 hover:text-white transition py-2">Close</button>
+        <button onClick={shareReceipt} className="w-full mt-4 bg-neutral-900 border border-neutral-800 text-white text-sm font-medium rounded-xl py-3 flex items-center justify-center gap-2 hover:bg-neutral-800 transition">
+          <Share2 className="w-4 h-4" /> {shared ? 'Copied' : 'Share receipt'}
+        </button>
+        <button onClick={onClose} className="w-full mt-3 text-sm text-neutral-500 hover:text-white transition py-2">Close</button>
       </div>
     </div>
   );
@@ -582,13 +637,18 @@ function TransactionRow({ tx }) {
   const [showDetail, setShowDetail] = useState(false);
   const positive = tx.amount > 0;
   const Icon = tx.icon;
+  const isPeer = tx.type === 'send_user' && tx.counterparty;
   return (
     <>
       <button onClick={() => setShowDetail(true)} className="w-full flex items-center justify-between py-3.5 border-b border-neutral-900 last:border-b-0 text-left hover:bg-neutral-900/40 transition -mx-1 px-1 rounded-lg">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center flex-shrink-0">
-            <Icon className="w-4 h-4 text-neutral-300" />
-          </div>
+          {isPeer ? (
+            <UserAvatar username={tx.counterparty} size={36} />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center flex-shrink-0">
+              <Icon className="w-4 h-4 text-neutral-300" />
+            </div>
+          )}
           <div>
             <div className="text-sm font-medium">{tx.title}</div>
             <div className="text-xs text-neutral-500">{tx.sub}</div>
@@ -741,6 +801,22 @@ function NotificationsScreen({ onBack }) {
 }
 
 function HistoryScreen({ onBack, transactions = [] }) {
+  const todayKey = new Date().toDateString();
+  const yesterdayKey = new Date(Date.now() - 86400000).toDateString();
+  const groupLabel = (dateKey) => {
+    if (dateKey === todayKey) return 'Today';
+    if (dateKey === yesterdayKey) return 'Yesterday';
+    return dateKey ? new Date(dateKey).toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Earlier';
+  };
+
+  const groups = [];
+  for (const tx of transactions) {
+    const key = tx.dateKey || 'Earlier';
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(tx);
+    else groups.push({ key, items: [tx] });
+  }
+
   return (
     <div>
       <BackHeader title="Transaction History" onBack={onBack} />
@@ -749,8 +825,15 @@ function HistoryScreen({ onBack, transactions = [] }) {
           <p className="text-sm text-neutral-500">No transactions yet</p>
         </div>
       ) : (
-        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
-          {transactions.map(tx => <TransactionRow key={tx.id} tx={tx} />)}
+        <div className="space-y-5">
+          {groups.map(g => (
+            <div key={g.key}>
+              <h3 className="text-xs font-medium text-neutral-500 mb-2 px-1">{groupLabel(g.key)}</h3>
+              <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
+                {g.items.map(tx => <TransactionRow key={tx.id} tx={tx} />)}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -866,7 +949,7 @@ function ReceiveScreen({ onBack }) {
     <div>
       <BackHeader title="Receive Crypto" onBack={onBack} />
       <p className="text-sm text-neutral-500 mb-4">
-        We don't hold crypto — pick a coin, get your address, and whatever lands there is converted to naira and credited to your wallet.
+        We don't hold crypto. Pick a coin, get your address, and whatever lands there is converted to naira and credited to your wallet.
       </p>
       <CryptoReceivePanel />
     </div>
@@ -878,7 +961,7 @@ function FundWalletScreen({ onBack, username = '' }) {
   return (
     <div>
       <BackHeader title="Fund Wallet" onBack={onBack} />
-      <p className="text-xs text-neutral-500 mb-4">Fund your wallet with crypto — automatically converted to naira at today's rate.</p>
+      <p className="text-xs text-neutral-500 mb-4">Fund your wallet with crypto, automatically converted to naira at today's rate.</p>
       <CryptoReceivePanel />
     </div>
   );
@@ -980,14 +1063,44 @@ function SendScreen({ onBack, onDone, hasPin }) {
   };
 
   if (step === 'success') {
+    const shareReceipt = async () => {
+      const text = `Tranxact\n${fmtNaira(Number(amount) || 0)} sent to ${recipientLabel}\n${new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}`;
+      if (navigator.share) {
+        try { await navigator.share({ title: 'Tranxact receipt', text }); } catch { /* cancelled */ }
+      } else {
+        navigator.clipboard?.writeText(text);
+      }
+    };
     return (
-      <div className="flex flex-col items-center text-center pt-10">
-        <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center mb-5">
-          <Check className="w-6 h-6 text-emerald-400" />
+      <div className="flex flex-col items-center text-center pt-8">
+        <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center mb-4">
+          <Check className="w-5 h-5 text-emerald-400" />
         </div>
-        <h2 className="text-lg font-bold mb-1">Sent successfully</h2>
-        <p className="text-neutral-500 text-sm mb-8">{fmtNaira(Number(amount) || 0)} is on its way to {recipientLabel}.</p>
-        <PrimaryButton onClick={onDone}>Done</PrimaryButton>
+        <h2 className="text-lg font-bold mb-1">{mode === 'bank' ? 'Transfer initiated' : 'Sent successfully'}</h2>
+        <p className="text-neutral-500 text-sm mb-6">
+          {mode === 'bank'
+            ? "We've sent this to your bank. It usually lands within a few minutes."
+            : 'This landed in their wallet instantly.'}
+        </p>
+
+        <div className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl p-5 flex flex-col items-center mb-6">
+          {mode === 'user' ? (
+            <UserAvatar username={username} size={48} />
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
+              <Landmark className="w-5 h-5 text-neutral-300" />
+            </div>
+          )}
+          <div className="font-mono text-2xl font-bold mt-3">{fmtNaira(Number(amount) || 0)}</div>
+          <div className="text-sm text-neutral-500 mt-1">to {recipientLabel}</div>
+        </div>
+
+        <div className="w-full space-y-3">
+          <button onClick={shareReceipt} className="w-full bg-neutral-900 border border-neutral-800 text-white text-sm font-medium rounded-2xl py-3.5 flex items-center justify-center gap-2 hover:bg-neutral-800 transition">
+            <Share2 className="w-4 h-4" /> Share receipt
+          </button>
+          <PrimaryButton onClick={onDone}>Done</PrimaryButton>
+        </div>
       </div>
     );
   }
@@ -1198,7 +1311,7 @@ function TranxactPayScreen({ onClose, username }) {
 
         {showingEmbed && (
           <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 mb-3">
-            <p className="text-xs text-neutral-500 mb-2">Paste this into your site's HTML — it'll render as a real button linking to this checkout.</p>
+            <p className="text-xs text-neutral-500 mb-2">Paste this into your site's HTML. It'll render as a real button linking to this checkout.</p>
             <pre className="text-[11px] text-violet-300 font-mono whitespace-pre-wrap break-all bg-black/40 rounded-lg p-2 mb-2">{embedCode}</pre>
             <button onClick={() => copy(embedCode, `embed-${link.slug}`)} className="w-full flex items-center justify-center gap-1.5 bg-neutral-800 rounded-lg py-2 text-xs">
               {copied === `embed-${link.slug}` ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied === `embed-${link.slug}` ? 'Copied' : 'Copy code'}
@@ -1302,7 +1415,7 @@ function TranxactPayScreen({ onClose, username }) {
               <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
             ) : tipLink === null ? (
               <div className="text-center py-6">
-                <p className="text-sm text-neutral-500 mb-4">No setup needed — one tap creates your permanent tip link.</p>
+                <p className="text-sm text-neutral-500 mb-4">No setup needed. One tap creates your permanent tip link.</p>
                 <PrimaryButton onClick={ensureTipLink} disabled={tipCreating}>
                   {tipCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create My Tip Link'}
                 </PrimaryButton>
@@ -1497,7 +1610,7 @@ function CryptoScreen() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold mb-1">Crypto</h1>
-        <p className="text-sm text-neutral-500">We don't hold crypto — payments you receive are converted to naira automatically at the current rate.</p>
+        <p className="text-sm text-neutral-500">We don't hold crypto. Payments you receive are converted to naira automatically at the current rate.</p>
       </div>
       <div>
         <h2 className="text-sm font-semibold mb-1">Supported Cryptos</h2>
@@ -1522,15 +1635,15 @@ function CardsScreen({ fullName = '' }) {
       <div className="max-w-sm mx-auto rounded-2xl overflow-hidden">
         <img
           src={`data:image/jpeg;base64,${CARD_IMG_B64}`}
-          alt="Tranxact Virtual Debit card — coming soon"
+          alt="Tranxact Virtual Debit card, coming soon"
           className="w-full h-auto block"
         />
       </div>
       <p className="text-sm text-neutral-400 text-center mt-8 max-w-xs mx-auto">
-        Your Tranxact card is on its way — clean, fast, and ready to tap wherever cards are accepted.
+        Your Tranxact card is on its way: clean, fast, and ready to tap wherever cards are accepted.
       </p>
       <p className="text-xs text-neutral-600 text-center mt-2 max-w-xs mx-auto">
-        Spend straight from your Tranxact balance. No top-up delays, no separate account — just your money, ready when you need it.
+        Spend straight from your Tranxact balance. No top-up delays, no separate account. Just your money, ready when you need it.
       </p>
     </div>
   );
@@ -1891,7 +2004,7 @@ function AdminScreen() {
                 />
               </div>
               <p className="text-xs text-neutral-600 mt-1.5">
-                Enter the USD value of what was received — not the raw coin quantity. Most wallets/explorers show this directly.
+                Enter the USD value of what was received, not the raw coin quantity. Most wallets/explorers show this directly.
               </p>
             </div>
             {(() => {
@@ -1966,7 +2079,7 @@ function AdminScreen() {
           <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-neutral-500" /></div>
         ) : pendingNotices.length > 0 ? (
           <div className="mb-4 space-y-2">
-            <p className="text-xs text-neutral-500 mb-1">Awaiting confirmation — tap to pre-fill the claim below, verify against what actually arrived, then Settle</p>
+            <p className="text-xs text-neutral-500 mb-1">Awaiting confirmation. Tap to pre-fill the claim below, verify against what actually arrived, then Settle</p>
             {pendingNotices.map(n => (
               <button
                 key={n.id}
@@ -2034,7 +2147,7 @@ function AdminScreen() {
                   {tpSuccess.flat_fee_ngn > 0 && ` (${fmtNaira(tpSuccess.percent_fee_ngn)} + ${fmtNaira(tpSuccess.flat_fee_ngn)} flat)`}
                 </p>
               )}
-              {tpSuccess.link_closed && <p className="text-xs text-neutral-500">Link closed — one-time payment settled</p>}
+              {tpSuccess.link_closed && <p className="text-xs text-neutral-500">Link closed. One-time payment settled</p>}
             </div>
           )}
           <PrimaryButton onClick={handleTpSettle} disabled={tpLoading}>
@@ -2309,7 +2422,7 @@ function UsernameScreen({ onBack, currentUsername, onChanged }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Username" value={value} onChange={e => setValue(e.target.value)} placeholder="username" />
         <p className="text-xs text-neutral-600">
-          Once you change your username, no one else can ever claim your old one — it stays permanently reserved to you.
+          Once you change your username, no one else can ever claim your old one. It stays permanently reserved to you.
         </p>
         {error && <p className="text-sm text-red-400">{error}</p>}
         {success && <p className="text-sm text-emerald-400">Username updated.</p>}
@@ -2437,7 +2550,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
         <div className="flex gap-2">
           <Field label="Amount (NGN, optional)" type="number" value={limit} onChange={e => setLimit(e.target.value)} placeholder="No limit set" />
         </div>
-        <p className="text-xs text-neutral-600 mt-2">Applies to sends and withdrawals — resets on a rolling 24-hour basis. Leave blank for no limit.</p>
+        <p className="text-xs text-neutral-600 mt-2">Applies to sends and withdrawals. Resets on a rolling 24-hour basis. Leave blank for no limit.</p>
         {limitSaved && <p className="text-sm text-emerald-400 mt-2">Saved.</p>}
         <PrimaryButton onClick={saveLimit} disabled={limitLoading} className="mt-4">
           {limitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save limit'}
@@ -2448,7 +2561,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm font-semibold">Push notifications</div>
-            <p className="text-xs text-neutral-600 mt-1">Get alerted the moment something happens to your account — even when the app is closed.</p>
+            <p className="text-xs text-neutral-600 mt-1">Get alerted the moment something happens to your account, even when the app is closed.</p>
           </div>
           <button
             onClick={togglePush}
@@ -2654,7 +2767,7 @@ function CheckoutPage({ slug }) {
                   <div className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-600">CVV</div>
                 </div>
               </div>
-              <p className="text-xs text-neutral-500 text-center mt-4">Card payments are on the way — use Naira or Crypto for now.</p>
+              <p className="text-xs text-neutral-500 text-center mt-4">Card payments are on the way. Use Naira or Crypto for now.</p>
             </div>
           )}
 
@@ -2747,10 +2860,10 @@ function VerificationModal({ onClose }) {
 
 function SupportScreen({ onBack }) {
   const faqs = [
-    { q: 'How do I fund my wallet?', a: 'Tap Fund Wallet on Home and send any supported crypto — it converts to naira automatically once confirmed.' },
+    { q: 'How do I fund my wallet?', a: 'Tap Fund Wallet on Home and send any supported crypto. It converts to naira automatically once confirmed.' },
     { q: 'Which crypto coins are supported?', a: 'ETH, BTC, BNB (BEP-20), USDT (TRC20), USDC (ERC-20), TRX, and SOL. Received crypto converts to naira automatically.' },
     { q: 'How long does a deposit take to reflect?', a: 'Usually a few minutes after the transfer or deposit is confirmed.' },
-    { q: 'Is sending to a Tranxact user free?', a: 'Yes — transfers between Tranxact users have no fee.' },
+    { q: 'Is sending to a Tranxact user free?', a: 'Yes, transfers between Tranxact users have no fee.' },
   ];
   return (
     <div>
@@ -2877,7 +2990,7 @@ function ReferralsScreen({ onBack, onEarnings, onLeaderboard, username, userId }
         </button>
       </div>
       <p className="text-xs text-neutral-600 mt-6 text-center">
-        You earn 25% of the crypto funding fee every time someone you referred receives crypto — and they get ₦1,000 on their first deposit of $25 or more.
+        You earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
       </p>
     </div>
   );
@@ -3101,7 +3214,7 @@ function DashboardOverview({ balance, totalReceived, paymentCount }) {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Overview</h1>
-      <p className="text-sm text-neutral-500 mb-8">Tranxact Pay is the infrastructure layer for how your business gets paid — links, tracking, and payouts, all in one place.</p>
+      <p className="text-sm text-neutral-500 mb-8">Tranxact Pay is the infrastructure layer for how your business gets paid: links, tracking, and payouts, all in one place.</p>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
           <div className="text-xs text-neutral-500 mb-2">Balance</div>
@@ -3116,7 +3229,7 @@ function DashboardOverview({ balance, totalReceived, paymentCount }) {
           <div className="font-mono text-2xl font-bold">{paymentCount}</div>
         </div>
       </div>
-      <p className="text-xs text-neutral-600 mt-6">This is the same Tranxact balance as your app — spendable there immediately, withdrawable here.</p>
+      <p className="text-xs text-neutral-600 mt-6">This is the same Tranxact balance as your app: spendable there immediately, withdrawable here.</p>
 
       <div className="relative bg-neutral-950 border border-violet-500/25 rounded-2xl p-6 mt-8 overflow-hidden">
         <div className="flex items-center gap-2 mb-2">
@@ -3124,7 +3237,7 @@ function DashboardOverview({ balance, totalReceived, paymentCount }) {
           <h2 className="text-sm font-semibold text-violet-300">Pay with Tranxact</h2>
         </div>
         <p className="text-sm text-neutral-400 max-w-md">
-          A checkout button for your own website — let customers pay directly with Tranxact, without ever leaving your product. Same rates, same tracking, same balance as everything else here.
+          A checkout button for your own website. Let customers pay directly with Tranxact, without ever leaving your product. Same rates, same tracking, same balance as everything else here.
         </p>
         <p className="text-xs text-neutral-500 mt-3">
           Head to <span className="text-violet-400 font-medium">Payment Links</span> and tap "Copy embed" on any link to grab the button code.
@@ -3190,7 +3303,7 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-2">Payment Links</h1>
-      <p className="text-sm text-neutral-500 mb-8">The core of how you get paid on Tranxact — tell us what it's for, and we'll set up the right checkout for it.</p>
+      <p className="text-sm text-neutral-500 mb-8">The core of how you get paid on Tranxact. Tell us what it's for, and we'll set up the right checkout for it.</p>
 
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-8">
         <h2 className="text-sm font-semibold mb-4">Create a new link</h2>
@@ -3245,11 +3358,11 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
         </div>
 
         <div className="mt-5 pt-5 border-t border-neutral-900">
-          <p className="text-xs text-neutral-500 mb-2">Need something more custom — recurring billing, high volume, a dedicated setup?</p>
+          <p className="text-xs text-neutral-500 mb-2">Need something more custom: recurring billing, high volume, a dedicated setup?</p>
           {!showSales ? (
             <button onClick={() => setShowSales(true)} className="text-sm text-violet-400 hover:text-violet-300 transition">Talk to Sales →</button>
           ) : salesSent ? (
-            <p className="text-sm text-emerald-400">✓ Thanks — we'll be in touch shortly.</p>
+            <p className="text-sm text-emerald-400">✓ Thanks, we'll be in touch shortly.</p>
           ) : (
             <div className="space-y-3 mt-3">
               <Field label="Your name" value={salesName} onChange={e => setSalesName(e.target.value)} placeholder="Full name" />
@@ -3474,7 +3587,7 @@ function DashboardWithdrawals({ balance, withdrawals, onRequest, requesting, req
           </div>
         </div>
         {requestError && <p className="text-sm text-red-400 mt-3">{requestError}</p>}
-        {requestSuccess && <p className="text-sm text-emerald-400 mt-3">✓ Withdrawal request submitted — you'll be paid once it's processed.</p>}
+        {requestSuccess && <p className="text-sm text-emerald-400 mt-3">✓ Withdrawal request submitted. You'll be paid once it's processed.</p>}
         <PrimaryButton onClick={handleSubmit} disabled={requesting || !canSubmit} className="mt-4" style={{ width: 'auto' }}>
           {requesting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Request Withdrawal'}
         </PrimaryButton>
