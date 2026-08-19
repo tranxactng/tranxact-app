@@ -59,7 +59,7 @@ export async function getRecentTransactions(userId, limit = 20) {
 
   const { data, error } = await supabase
     .from('ledger_entries')
-    .select('amount, transaction_id, created_at, transactions(type, status, counterparty, description, crypto_asset, user_id)')
+    .select('amount, transaction_id, created_at, transactions(type, status, counterparty, description, crypto_asset, user_id, is_correction)')
     .eq('wallet_id', wallet.id)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -100,6 +100,7 @@ export async function getRecentTransactions(userId, limit = 20) {
       counterparty,
       direction: received ? 'received' : 'sent',
       description: t?.description,
+      is_correction: t?.is_correction || false,
       created_at: row.created_at,
     };
   });
