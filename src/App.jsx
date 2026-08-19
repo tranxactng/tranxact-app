@@ -63,14 +63,14 @@ function mapTransaction(row) {
   const pending = row.status === 'pending';
   const createdDate = new Date(normalizeTimestamp(row.created_at));
   const validDate = !isNaN(createdDate.getTime());
-  // Two transactions on the same day both showing "17 Aug" are indistinguishable
-  // in the list — show the actual time for anything from today, and fall back
-  // to a date for older entries, so the list itself carries real ordering info.
+  // Always include the time, not just the date — two transactions on the same
+  // day both showing "17 Aug" were indistinguishable. Today's entries show
+  // time only (the date is implied); older entries show date + time together.
   const isToday = validDate && createdDate.toDateString() === new Date().toDateString();
   const listTime = validDate
     ? (isToday
         ? createdDate.toLocaleTimeString('en-NG', { hour: 'numeric', minute: '2-digit' })
-        : createdDate.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }))
+        : createdDate.toLocaleString('en-NG', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))
     : '';
   return {
     id: row.id,
@@ -476,13 +476,13 @@ function ActionButton({ label, sub, icon: Icon, onClick }) {
   );
 }
 
-function ServiceTile({ label, icon: Icon }) {
+function ServiceTile({ label, icon: Icon, light = false }) {
   return (
-    <button className="flex flex-col items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-2xl py-4 hover:bg-neutral-900 transition active:scale-[0.98]">
-      <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-        <Icon className="w-4 h-4" />
+    <button className={`flex flex-col items-center gap-2 rounded-2xl py-4 transition active:scale-[0.98] ${light ? 'bg-white border border-neutral-200 hover:border-neutral-300' : 'bg-neutral-950 border border-neutral-800 hover:bg-neutral-900'}`}>
+      <div className={`w-9 h-9 rounded-full flex items-center justify-center ${light ? 'bg-neutral-100 border border-neutral-200' : 'bg-neutral-900 border border-neutral-800'}`}>
+        <Icon className={`w-4 h-4 ${light ? 'text-neutral-700' : ''}`} />
       </div>
-      <span className="text-xs text-neutral-400">{label}</span>
+      <span className={`text-xs ${light ? 'text-neutral-600' : 'text-neutral-400'}`}>{label}</span>
     </button>
   );
 }
@@ -526,27 +526,34 @@ function TransactionDetailModal({ tx, onClose }) {
   );
 }
 
-function TransactionRow({ tx }) {
+function TransactionRow({ tx, light = false }) {
   const [showDetail, setShowDetail] = useState(false);
   const positive = tx.amount > 0;
   const Icon = tx.icon;
   return (
     <>
-      <button onClick={() => setShowDetail(true)} className="w-full flex items-center justify-between py-3.5 border-b border-neutral-900 last:border-b-0 text-left hover:bg-neutral-900/40 transition -mx-1 px-1 rounded-lg">
+      <button
+        onClick={() => setShowDetail(true)}
+        className={`w-full flex items-center justify-between py-3.5 text-left transition -mx-1 px-1 rounded-lg last:border-b-0 ${
+          light
+            ? 'border-b border-neutral-200 hover:bg-neutral-50'
+            : 'border-b border-neutral-900 hover:bg-neutral-900/40'
+        }`}
+      >
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center flex-shrink-0">
-            <Icon className="w-4 h-4 text-neutral-300" />
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${light ? 'bg-neutral-100 border border-neutral-200' : 'bg-neutral-900 border border-neutral-800'}`}>
+            <Icon className={`w-4 h-4 ${light ? 'text-neutral-600' : 'text-neutral-300'}`} />
           </div>
           <div>
-            <div className="text-sm font-medium">{tx.title}</div>
-            <div className="text-xs text-neutral-500">{tx.sub}</div>
+            <div className={`text-sm font-medium ${light ? 'text-neutral-900' : ''}`}>{tx.title}</div>
+            <div className={`text-xs ${light ? 'text-neutral-500' : 'text-neutral-500'}`}>{tx.sub}</div>
           </div>
         </div>
         <div className="text-right">
-          <div className={`font-mono text-sm ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
+          <div className={`font-mono text-sm ${positive ? 'text-emerald-500' : light ? 'text-neutral-900' : 'text-red-400'}`}>
             {positive ? '+' : '-'}{fmtNaira(tx.amount)}
           </div>
-          <div className="text-xs text-neutral-500">{tx.time}</div>
+          <div className={`text-xs ${light ? 'text-neutral-500' : 'text-neutral-500'}`}>{tx.time}</div>
         </div>
       </button>
       {showDetail && <TransactionDetailModal tx={tx} onClose={() => setShowDetail(false)} />}
@@ -557,59 +564,65 @@ function TransactionRow({ tx }) {
 // ---------- Home ----------
 function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onTranxactPay, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
+    <div className="flex flex-col">
+      {/* Dark hero — greeting, balance, quick actions */}
+      <div className="space-y-6 pb-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-xl font-bold">Hi, {displayName} 👋</h1>
+            <p className="text-neutral-500 text-sm">Welcome back</p>
+          </div>
+          <button onClick={onOpenNotifications} className="relative w-10 h-10 rounded-full bg-neutral-950 border border-neutral-800 flex items-center justify-center hover:bg-neutral-900 transition">
+            <Bell className="w-4 h-4" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-400 text-black text-[10px] font-bold flex items-center justify-center">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        <BalanceCard visible={balanceVisible} onToggle={toggleBalance} onFund={onFund} balance={balance} />
+
+        <div className="grid grid-cols-3 gap-3">
+          <ActionButton label="Receive" sub="Crypto only" icon={ArrowDownToLine} onClick={onReceive} />
+          <ActionButton label="Send" sub="To user or bank" icon={ArrowUpFromLine} onClick={onSend} />
+          <ActionButton label="TranxactPay" sub="Payment link" icon={Link2} onClick={onTranxactPay} />
+        </div>
+      </div>
+
+      {/* Light body — bleeds full-width past the shell's padding and extends
+          behind the fixed bottom nav, matching the reference two-tone layout. */}
+      <div className="-mx-5 sm:-mx-8 -mb-28 md:-mb-8 px-5 sm:px-8 pt-6 pb-32 md:pb-8 bg-neutral-100 rounded-t-3xl text-neutral-900 space-y-6">
         <div>
-          <h1 className="text-xl font-bold">Hi, {displayName} 👋</h1>
-          <p className="text-neutral-500 text-sm">Welcome back</p>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-neutral-900">Pay Bills &amp; Services</h2>
+            <button className="text-xs text-neutral-500 hover:text-neutral-900 transition">See all</button>
+          </div>
+          <div className="grid grid-cols-5 gap-2">
+            {BILLS.map(b => <ServiceTile key={b.label} label={b.label} icon={b.icon} light />)}
+          </div>
         </div>
-        <button onClick={onOpenNotifications} className="relative w-10 h-10 rounded-full bg-neutral-950 border border-neutral-800 flex items-center justify-center hover:bg-neutral-900 transition">
-          <Bell className="w-4 h-4" />
-          {unreadCount > 0 && (
-            <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-400 text-black text-[10px] font-bold flex items-center justify-center">
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
-          )}
-        </button>
-      </div>
 
-      <BalanceCard visible={balanceVisible} onToggle={toggleBalance} onFund={onFund} balance={balance} />
-
-      <div className="grid grid-cols-3 gap-3">
-        <ActionButton label="Receive" sub="Crypto only" icon={ArrowDownToLine} onClick={onReceive} />
-        <ActionButton label="Send" sub="To user or bank" icon={ArrowUpFromLine} onClick={onSend} />
-        <ActionButton label="TranxactPay" sub="Payment link" icon={Link2} onClick={onTranxactPay} />
-      </div>
-
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Pay Bills &amp; Services</h2>
-          <button className="text-xs text-neutral-500 hover:text-white transition">See all</button>
-        </div>
-        <div className="grid grid-cols-5 gap-2">
-          {BILLS.map(b => <ServiceTile key={b.label} label={b.label} icon={b.icon} />)}
-        </div>
-      </div>
-
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-sm font-semibold">Recent Transactions</h2>
-          {transactions.length > 0 && (
-            <button onClick={onSeeAll} className="text-xs text-neutral-500 hover:text-white transition">See all</button>
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-semibold text-neutral-900">Recent Transactions</h2>
+            {transactions.length > 0 && (
+              <button onClick={onSeeAll} className="text-xs text-neutral-500 hover:text-neutral-900 transition">See all</button>
+            )}
+          </div>
+          {transactions.length === 0 ? (
+            <div className="bg-white border border-neutral-200 rounded-2xl py-8 text-center">
+              <p className="text-sm text-neutral-500">No transactions yet</p>
+              <p className="text-xs text-neutral-400 mt-1">Fund your wallet or receive crypto to get started</p>
+            </div>
+          ) : (
+            <div className="bg-white border border-neutral-200 rounded-2xl px-4">
+              {transactions.slice(0, 3).map(tx => <TransactionRow key={tx.id} tx={tx} light />)}
+            </div>
           )}
         </div>
-        {transactions.length === 0 ? (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl py-8 text-center">
-            <p className="text-sm text-neutral-500">No transactions yet</p>
-            <p className="text-xs text-neutral-600 mt-1">Fund your wallet or receive crypto to get started</p>
-          </div>
-        ) : (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
-            {transactions.slice(0, 3).map(tx => <TransactionRow key={tx.id} tx={tx} />)}
-          </div>
-        )}
       </div>
-
     </div>
   );
 }
