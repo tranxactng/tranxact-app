@@ -59,7 +59,7 @@ export async function getRecentTransactions(userId, limit = 20) {
 
   const { data, error } = await supabase
     .from('ledger_entries')
-    .select('amount, transaction_id, created_at, transactions(type, status, counterparty, description, crypto_asset, user_id, is_correction)')
+    .select('amount, transaction_id, created_at, transactions(type, status, counterparty, description, crypto_asset, user_id)')
     .eq('wallet_id', wallet.id)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -100,7 +100,6 @@ export async function getRecentTransactions(userId, limit = 20) {
       counterparty,
       direction: received ? 'received' : 'sent',
       description: t?.description,
-      is_correction: t?.is_correction || false,
       created_at: row.created_at,
     };
   });
@@ -127,7 +126,7 @@ export async function sendToUser(username, amount) {
 }
 
 // Calls the deployed edge function to get (or create) a deposit address for the given asset.
-export async function getDepositAddress(assetSymbol) {
+export async function getDepositAddress(assetSymbol, network) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
 
@@ -137,7 +136,7 @@ export async function getDepositAddress(assetSymbol) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ asset: assetSymbol }),
+    body: JSON.stringify({ asset: assetSymbol, network }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to get deposit address');
@@ -219,6 +218,21 @@ export async function adminUpdateBaseRate(baseRate) {
 
 export async function adminUpdateSpread(symbol, spreadPercentage) {
   return callAdminFunction('admin-manage-rates', { action: 'update_spread', symbol, spread_percentage: spreadPercentage });
+}
+
+// Extremely sensitive — returns a real, importable private key controlling
+// real funds. The backend re-derives and cross-checks the address before
+// ever returning anything; this function itself has no extra gate beyond
+// the same admin check every other admin function uses.
+export async function adminRevealPrivateKey(username, asset) {
+  return callAdminFunction('admin-reveal-private-key', { username, asset });
+}
+
+// action: 'check_balance' (read-only, safe) or 'sweep' (broadcasts a real
+// transaction). Only ERC20/BEP20 supported so far — Bitcoin needs its own
+// implementation, not built yet.
+export async function adminSweepEvm(action, username, asset, network) {
+  return callAdminFunction('admin-sweep-evm', { action, username, asset, network });
 }
 
 // Every existing account has a null full_name because the signup trigger
