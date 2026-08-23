@@ -10,7 +10,7 @@ import {
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
-  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread,
+  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
@@ -1033,9 +1033,19 @@ function HistoryScreen({ onBack, transactions = [], onSendAgain }) {
 }
 
 // ---------- Crypto receive (shared: used by Receive, Fund Wallet, Crypto tab) ----------
+// USDT and USDC exist on multiple real networks — everything else is native
+// to just one chain, so no choice is needed for those.
+// USDC-BEP20 deliberately excluded — Circle's own official contract list
+// doesn't include BNB Chain, meaning "USDC" there is very likely a bridged/
+// third-party token, not the real Circle-issued asset. Not enabling until
+// separately, properly verified.
+const MULTI_NETWORK_OPTIONS = { USDT: ['TRC20', 'ERC20', 'BEP20'] };
+const NETWORK_DISPLAY_NAME = { TRC20: 'TRC20 (Tron)', ERC20: 'ERC20 (Ethereum)', BEP20: 'BEP20 (BNB Smart Chain)' };
+
 function CryptoReceivePanel() {
   const [assets, setAssets] = useState(null); // null = loading
   const [selected, setSelected] = useState(null); // { symbol, name, network }
+  const [chosenNetwork, setChosenNetwork] = useState(null);
   const [address, setAddress] = useState(null);
   const [addressLoading, setAddressLoading] = useState(false);
   const [error, setError] = useState('');
@@ -1048,14 +1058,12 @@ function CryptoReceivePanel() {
     });
   }, []);
 
-  const openAsset = async (a) => {
-    if (!a.is_receivable) return;
-    setSelected(a);
+  const fetchAddress = async (symbol, network) => {
     setAddress(null);
     setError('');
     setAddressLoading(true);
     try {
-      const result = await getDepositAddress(a.symbol);
+      const result = await getDepositAddress(symbol, network);
       setAddress(result.address);
     } catch (e) {
       setError(e.message);
@@ -1064,12 +1072,53 @@ function CryptoReceivePanel() {
     }
   };
 
+  const openAsset = (a) => {
+    if (!a.is_receivable) return;
+    setSelected(a);
+    setChosenNetwork(null);
+    const options = MULTI_NETWORK_OPTIONS[a.symbol];
+    if (options) return; // wait for network choice — see picker below
+    fetchAddress(a.symbol, undefined);
+  };
+
+  const pickNetwork = (net) => {
+    setChosenNetwork(net);
+    fetchAddress(selected.symbol, net);
+  };
+
+  const awaitingNetworkChoice = selected && MULTI_NETWORK_OPTIONS[selected.symbol] && !chosenNetwork;
+
   if (selected) {
     return (
       <div>
         <button onClick={() => setSelected(null)} className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-white transition mb-4">
           <ChevronLeft className="w-4 h-4" /> Choose a different coin
         </button>
+
+        {awaitingNetworkChoice ? (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <CoinIcon symbol={selected.symbol} size={32} />
+              <div>
+                <div className="text-sm font-semibold">{selected.name}</div>
+                <div className="text-xs text-neutral-500">Choose which network you're sending from</div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {MULTI_NETWORK_OPTIONS[selected.symbol].map(net => (
+                <button
+                  key={net}
+                  onClick={() => pickNetwork(net)}
+                  className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3.5 text-left hover:border-violet-500 transition"
+                >
+                  <span className="text-sm font-medium">{NETWORK_DISPLAY_NAME[net] || net}</span>
+                  <ChevronRight className="w-4 h-4 text-neutral-600" />
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-amber-300/80 mt-4">Pick the wrong network and the funds may be unrecoverable — match this to what your exchange or wallet actually sends on.</p>
+          </div>
+        ) : (
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex flex-col items-center">
           {addressLoading ? (
             <div className="py-10 flex flex-col items-center gap-3">
@@ -1083,7 +1132,12 @@ function CryptoReceivePanel() {
               <div className="w-40 h-40 bg-white rounded-2xl flex items-center justify-center mb-5 p-3">
                 <BrandedQR data={address} size={136} />
               </div>
-              <div className="text-xs text-neutral-500 mb-2">{selected.name} · {selected.network} network</div>
+              <div className="text-xs text-neutral-500 mb-2">
+                {selected.name} · {NETWORK_DISPLAY_NAME[chosenNetwork] || selected.network} network
+                {chosenNetwork && (
+                  <button onClick={() => { setChosenNetwork(null); setAddress(null); }} className="text-violet-400 ml-2">Change</button>
+                )}
+              </div>
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 w-full text-center font-mono text-xs text-neutral-300 break-all mb-4">
                 {address}
               </div>
@@ -1096,9 +1150,10 @@ function CryptoReceivePanel() {
             </>
           )}
         </div>
-        {!addressLoading && !error && (
+        )}
+        {!awaitingNetworkChoice && !addressLoading && !error && (
           <p className="text-xs text-neutral-600 text-center mt-4">
-            Only send {selected.symbol} on the {selected.network} network to this address. It's converted to naira automatically at the current rate and credited to your wallet.
+            Only send {selected.symbol} on the {NETWORK_DISPLAY_NAME[chosenNetwork] || selected.network} network to this address. It's converted to naira automatically at the current rate and credited to your wallet.
           </p>
         )}
       </div>
@@ -1885,6 +1940,21 @@ function AdminScreen() {
   const [spreadInputs, setSpreadInputs] = useState({});
   const [spreadSaving, setSpreadSaving] = useState(null);
   const [spreadError, setSpreadError] = useState('');
+  const [pkUsername, setPkUsername] = useState('');
+  const [pkAsset, setPkAsset] = useState('BTC');
+  const [pkConfirming, setPkConfirming] = useState(false);
+  const [pkLoading, setPkLoading] = useState(false);
+  const [pkResult, setPkResult] = useState(null);
+  const [pkError, setPkError] = useState('');
+  const [swUsername, setSwUsername] = useState('');
+  const [swAsset, setSwAsset] = useState('ETH');
+  const [swNetwork, setSwNetwork] = useState('ERC20');
+  const [swChecking, setSwChecking] = useState(false);
+  const [swResult, setSwResult] = useState(null);
+  const [swError, setSwError] = useState('');
+  const [swConfirmingSweep, setSwConfirmingSweep] = useState(false);
+  const [swSweeping, setSwSweeping] = useState(false);
+  const [swSweepResult, setSwSweepResult] = useState(null);
 
   const loadStats = async () => {
     try {
@@ -1932,6 +2002,51 @@ function AdminScreen() {
       setSpreadError(e.message);
     } finally {
       setSpreadSaving(null);
+    }
+  };
+
+  const revealPrivateKey = async () => {
+    setPkError('');
+    setPkResult(null);
+    setPkLoading(true);
+    try {
+      const res = await adminRevealPrivateKey(pkUsername.trim().toLowerCase().replace(/^@/, ''), pkAsset);
+      setPkResult(res);
+    } catch (e) {
+      setPkError(e.message);
+    } finally {
+      setPkLoading(false);
+      setPkConfirming(false);
+    }
+  };
+
+  const checkEvmBalance = async () => {
+    setSwError('');
+    setSwResult(null);
+    setSwSweepResult(null);
+    setSwConfirmingSweep(false);
+    setSwChecking(true);
+    try {
+      const res = await adminSweepEvm('check_balance', swUsername.trim().toLowerCase().replace(/^@/, ''), swAsset, swNetwork);
+      setSwResult(res);
+    } catch (e) {
+      setSwError(e.message);
+    } finally {
+      setSwChecking(false);
+    }
+  };
+
+  const executeSweep = async () => {
+    setSwError('');
+    setSwSweeping(true);
+    try {
+      const res = await adminSweepEvm('sweep', swUsername.trim().toLowerCase().replace(/^@/, ''), swAsset, swNetwork);
+      setSwSweepResult(res);
+    } catch (e) {
+      setSwError(e.message);
+    } finally {
+      setSwSweeping(false);
+      setSwConfirmingSweep(false);
     }
   };
 
@@ -2476,6 +2591,138 @@ function AdminScreen() {
             {spreadError && <p className="text-xs text-red-400 mt-2">{spreadError}</p>}
           </>
         )}
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-1 text-amber-400">Reveal Deposit Private Key</h2>
+        <p className="text-xs text-neutral-500 mb-3">Extremely sensitive — this returns a real key controlling real funds. The backend re-derives and verifies the address before returning anything.</p>
+        <div className="bg-neutral-950 border border-amber-500/30 rounded-2xl p-4">
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <input
+              value={pkUsername}
+              onChange={e => { setPkUsername(e.target.value); setPkResult(null); setPkError(''); }}
+              placeholder="username"
+              className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-amber-500"
+            />
+            <select
+              value={pkAsset}
+              onChange={e => { setPkAsset(e.target.value); setPkResult(null); setPkError(''); }}
+              className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-white"
+            >
+              {ASSETS.map(a => <option key={a.symbol} value={a.symbol}>{a.symbol}</option>)}
+            </select>
+          </div>
+
+          {!pkConfirming ? (
+            <button
+              onClick={() => setPkConfirming(true)}
+              disabled={!pkUsername.trim()}
+              className="w-full bg-amber-500/15 border border-amber-500/40 text-amber-400 rounded-lg py-2.5 text-sm font-semibold disabled:opacity-40"
+            >
+              Reveal Private Key
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-amber-300">This will display a real private key. Anyone who sees it can move the funds at that address. Continue?</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => setPkConfirming(false)} className="bg-neutral-800 rounded-lg py-2.5 text-sm">Cancel</button>
+                <button onClick={revealPrivateKey} disabled={pkLoading} className="bg-amber-500 text-black rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
+                  {pkLoading ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Yes, reveal it'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {pkError && <p className="text-xs text-red-400 mt-3">{pkError}</p>}
+
+          {pkResult && (
+            <div className="mt-3 bg-black/40 border border-amber-500/20 rounded-lg p-3 space-y-2">
+              <div className="flex items-center gap-2 text-xs text-emerald-400">
+                <Check className="w-3.5 h-3.5" /> Address verified — matches what's on record
+              </div>
+              <div>
+                <div className="text-[11px] text-neutral-500">Address</div>
+                <div className="text-xs font-mono break-all">{pkResult.address}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-neutral-500">Private key ({pkResult.key_format})</div>
+                <div className="text-xs font-mono break-all text-amber-300">{pkResult.private_key}</div>
+              </div>
+              <div className="text-[11px] text-neutral-600">Derivation index {pkResult.derivation_index}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-1">Sweep to Treasury (EVM only — ETH/BNB)</h2>
+        <p className="text-xs text-neutral-500 mb-3">Checking a balance is read-only and safe. Sweeping broadcasts a real transaction. Bitcoin isn't supported here yet.</p>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <input
+              value={swUsername}
+              onChange={e => { setSwUsername(e.target.value); setSwResult(null); setSwSweepResult(null); setSwError(''); }}
+              placeholder="username"
+              className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+            />
+            <select value={swAsset} onChange={e => { setSwAsset(e.target.value); setSwResult(null); setSwSweepResult(null); }} className="bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2.5 text-sm text-white">
+              {['ETH', 'BNB', 'USDT', 'USDC'].map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            <select value={swNetwork} onChange={e => { setSwNetwork(e.target.value); setSwResult(null); setSwSweepResult(null); }} className="bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2.5 text-sm text-white">
+              <option value="ERC20">ERC20</option>
+              <option value="BEP20">BEP20</option>
+            </select>
+          </div>
+
+          <button onClick={checkEvmBalance} disabled={swChecking || !swUsername.trim()} className="w-full bg-neutral-800 rounded-lg py-2.5 text-sm font-semibold disabled:opacity-40 mb-2">
+            {swChecking ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Check Balance (safe, read-only)'}
+          </button>
+
+          {swError && <p className="text-xs text-red-400 mt-2">{swError}</p>}
+
+          {swResult && (
+            <div className="mt-3 bg-black/40 border border-neutral-800 rounded-lg p-3 space-y-1.5">
+              <div className="text-[11px] text-neutral-500">Address</div>
+              <div className="text-xs font-mono break-all mb-2">{swResult.address}</div>
+              {swResult.balance !== undefined ? (
+                <>
+                  <div className="text-xs">Balance: <span className="font-mono">{swResult.balance} {swResult.symbol}</span></div>
+                  <div className="text-xs">Sweepable after gas: <span className="font-mono text-emerald-400">{swResult.sweepable} {swResult.symbol}</span></div>
+                </>
+              ) : (
+                <>
+                  <div className="text-xs">Token balance: <span className="font-mono">{swResult.token_balance} {swAsset}</span></div>
+                  <div className="text-xs">Native gas available: <span className="font-mono">{swResult.native_gas_balance} {swResult.native_symbol}</span></div>
+                </>
+              )}
+
+              {!swConfirmingSweep ? (
+                <button onClick={() => setSwConfirmingSweep(true)} className="w-full bg-amber-500/15 border border-amber-500/40 text-amber-400 rounded-lg py-2 text-xs font-semibold mt-3">
+                  Sweep to Treasury
+                </button>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-amber-300">This broadcasts a real transaction. Continue?</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => setSwConfirmingSweep(false)} className="bg-neutral-800 rounded-lg py-2 text-xs">Cancel</button>
+                    <button onClick={executeSweep} disabled={swSweeping} className="bg-amber-500 text-black rounded-lg py-2 text-xs font-semibold disabled:opacity-50">
+                      {swSweeping ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : 'Yes, sweep it'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {swSweepResult && (
+            <div className="mt-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 space-y-1">
+              <div className="flex items-center gap-2 text-xs text-emerald-400"><Check className="w-3.5 h-3.5" /> Swept</div>
+              <div className="text-xs">Amount: <span className="font-mono">{swSweepResult.amount}</span></div>
+              <div className="text-[11px] text-neutral-500 break-all">Tx: {swSweepResult.tx_hash}</div>
+              {swSweepResult.gas_funding_tx_hash && <div className="text-[11px] text-neutral-500 break-all">Gas funding tx: {swSweepResult.gas_funding_tx_hash}</div>}
+            </div>
+          )}
+        </div>
       </div>
 
       <div>
