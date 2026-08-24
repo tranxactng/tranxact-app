@@ -16,6 +16,7 @@ import {
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
+  isBusinessSlugAvailable, createBusiness, getMyBusiness, updateBusiness, getMyBusinessProducts, getBusinessStorefront, uploadBusinessAsset,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
   listPaystackBanks, resolveBankAccount,
   getMyNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead
@@ -4413,11 +4414,450 @@ function MobileAppRoot() {
   );
 }
 
+// ---------- Business Platform ----------
+// Public storefront at business.tranxact.co/{slug} — no login required.
+// Every "buy" button links straight to the existing, already-proven checkout
+// at app.tranxact.co/pay/{slug} — zero new payment code, same crypto/naira/
+// admin-settlement flow that already works today.
+function BusinessStorefrontScreen({ slug }) {
+  const [business, setBusiness] = useState(null); // null = loading, false = not found
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    getBusinessStorefront(slug)
+      .then(setBusiness)
+      .catch((e) => { setError(e.message); setBusiness(false); });
+  }, [slug]);
+
+  if (business === null) {
+    return <div className="min-h-screen bg-black flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
+  }
+  if (business === false) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-center px-6">
+        <LogoMark size={36} />
+        <p className="text-neutral-500 text-sm mt-6">{error || "This business page doesn't exist."}</p>
+      </div>
+    );
+  }
+
+  const typeLabel = { product: 'Product', service: 'Service', event: 'Event' };
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <div className="max-w-lg mx-auto px-5 py-10">
+        <div className="flex flex-col items-center text-center mb-10">
+          {business.logo_url ? (
+            <img src={business.logo_url} alt={business.name} className="w-16 h-16 rounded-2xl object-cover mb-4" />
+          ) : (
+            <div className="w-16 h-16 rounded-2xl bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-4">
+              <LogoMark size={28} />
+            </div>
+          )}
+          <h1 className="text-xl font-bold">{business.name}</h1>
+          {business.description && <p className="text-sm text-neutral-500 mt-2 max-w-sm">{business.description}</p>}
+        </div>
+
+        {business.products.length === 0 ? (
+          <p className="text-sm text-neutral-600 text-center py-10">Nothing listed here yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {business.products.map((p) => (
+              <a
+                key={p.slug}
+                href={`https://app.tranxact.co/pay/${p.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-4 bg-neutral-950 border border-neutral-800 rounded-2xl p-4 hover:border-violet-500 transition"
+              >
+                {p.image_url ? (
+                  <img src={p.image_url} alt={p.title} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                ) : (
+                  <div className="w-14 h-14 rounded-xl bg-neutral-900 flex items-center justify-center flex-shrink-0">
+                    <Link2 className="w-5 h-5 text-neutral-600" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-violet-400 font-medium mb-0.5">{typeLabel[p.product_type] || 'Product'}</div>
+                  <div className="text-sm font-semibold truncate">{p.title}</div>
+                  {p.description && <div className="text-xs text-neutral-500 truncate">{p.description}</div>}
+                </div>
+                <div className="text-sm font-mono flex-shrink-0">{p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}</div>
+              </a>
+            ))}
+          </div>
+        )}
+
+        <div className="text-center mt-12 text-xs text-neutral-700">Powered by Tranxact</div>
+      </div>
+    </div>
+  );
+}
+
+function CreateBusinessScreen({ onCreated }) {
+  const [name, setName] = useState('');
+  const [slug, setSlug] = useState('');
+  const [description, setDescription] = useState('');
+  const [slugStatus, setSlugStatus] = useState(''); // '', 'checking', 'available', 'taken'
+  const [logoUrl, setLogoUrl] = useState('');
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoError, setLogoError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleLogoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoError('');
+    setLogoUploading(true);
+    try {
+      const url = await uploadBusinessAsset(file);
+      setLogoUrl(url);
+    } catch (err) {
+      setLogoError(err.message);
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (slug.length < 3) { setSlugStatus(''); return; }
+    let cancelled = false;
+    setSlugStatus('checking');
+    const t = setTimeout(() => {
+      isBusinessSlugAvailable(slug).then((available) => {
+        if (!cancelled) setSlugStatus(available ? 'available' : 'taken');
+      }).catch(() => { if (!cancelled) setSlugStatus(''); });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [slug]);
+
+  const handleCreate = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const business = await createBusiness({ name, slug, description });
+      if (logoUrl) await updateBusiness(business.id, { logo_url: logoUrl });
+      onCreated({ ...business, logo_url: logoUrl || null });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canCreate = name.trim() && slug.trim().length >= 3 && slugStatus === 'available';
+
+  return (
+    <div className="min-h-screen bg-black text-white flex items-center justify-center px-5">
+      <div className="w-full max-w-sm">
+        <div className="flex items-center gap-2.5 mb-8 justify-center">
+          <LogoMark size={22} />
+          <span className="font-bold text-lg">Tranxact Business</span>
+        </div>
+        <h1 className="text-xl font-bold mb-1 text-center">Create your business</h1>
+        <p className="text-sm text-neutral-500 text-center mb-8">Sell products, services, or events with your own page.</p>
+
+        <div className="space-y-4">
+          <label className="block">
+            <span className="text-sm text-neutral-400 mb-2 block">Logo (optional)</span>
+            <div className="flex items-center gap-3">
+              <div className="w-16 h-16 rounded-2xl bg-neutral-900 border border-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
+                {logoUploading ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
+                ) : logoUrl ? (
+                  <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
+                ) : (
+                  <LogoMark size={22} />
+                )}
+              </div>
+              <label className="text-xs bg-neutral-800 rounded-lg px-3 py-2 cursor-pointer">
+                {logoUrl ? 'Change' : 'Upload'}
+                <input type="file" accept="image/*" onChange={handleLogoSelect} className="hidden" />
+              </label>
+            </div>
+            {logoError && <p className="text-xs text-red-400 mt-1.5">{logoError}</p>}
+          </label>
+          <Field label="Business name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jaffar Designs" />
+          <div>
+            <label className="block">
+              <span className="text-sm text-neutral-400 mb-2 block">Your link</span>
+              <div className="flex items-center bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
+                <span className="text-sm text-neutral-500 flex-shrink-0">business.tranxact.co/</span>
+                <input
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  placeholder="yourbusiness"
+                  className="bg-transparent outline-none text-white text-sm flex-1 min-w-0"
+                />
+              </div>
+            </label>
+            {slugStatus === 'checking' && <p className="text-xs text-neutral-500 mt-1.5">Checking…</p>}
+            {slugStatus === 'available' && <p className="text-xs text-emerald-400 mt-1.5">Available</p>}
+            {slugStatus === 'taken' && <p className="text-xs text-red-400 mt-1.5">Already taken</p>}
+          </div>
+          <Field label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What do you sell?" />
+        </div>
+
+        {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+        <PrimaryButton onClick={handleCreate} disabled={!canCreate || loading} className="mt-6">
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create business'}
+        </PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+function AddProductScreen({ business, onBack, onAdded }) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [productType, setProductType] = useState('product');
+  const [linkType, setLinkType] = useState('fixed');
+  const [amount, setAmount] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageError('');
+    setImageUploading(true);
+    try {
+      const url = await uploadBusinessAsset(file);
+      setImageUrl(url);
+    } catch (err) {
+      setImageError(err.message);
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
+  const handleAdd = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await createPaymentLink({
+        title, description, link_type: linkType,
+        amount: linkType === 'fixed' ? Number(amount) : undefined,
+        business_id: business.id, product_type: productType,
+        image_url: imageUrl || undefined,
+      });
+      onAdded();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-sm mx-auto px-5 py-8">
+      <BackHeader title="Add to your page" onBack={onBack} />
+      <div className="space-y-4">
+        <label className="block">
+          <span className="text-sm text-neutral-400 mb-2 block">Photo (optional)</span>
+          <div className="flex items-center gap-3">
+            <div className="w-16 h-16 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
+              {imageUploading ? (
+                <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
+              ) : imageUrl ? (
+                <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <ImageIcon className="w-5 h-5 text-neutral-600" />
+              )}
+            </div>
+            <label className="text-xs bg-neutral-800 rounded-lg px-3 py-2 cursor-pointer">
+              {imageUrl ? 'Change' : 'Upload'}
+              <input type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+            </label>
+          </div>
+          {imageError && <p className="text-xs text-red-400 mt-1.5">{imageError}</p>}
+        </label>
+        <div>
+          <span className="text-sm text-neutral-400 mb-2 block">Type</span>
+          <TabToggle
+            options={[{ value: 'product', label: 'Product' }, { value: 'service', label: 'Service' }, { value: 'event', label: 'Event' }]}
+            value={productType}
+            onChange={setProductType}
+          />
+        </div>
+        <Field label="Name" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Logo Design" />
+        <Field label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's included" />
+        <div>
+          <span className="text-sm text-neutral-400 mb-2 block">Pricing</span>
+          <TabToggle
+            options={[{ value: 'fixed', label: 'Fixed amount' }, { value: 'flexible', label: 'Flexible' }]}
+            value={linkType}
+            onChange={setLinkType}
+          />
+        </div>
+        {linkType === 'fixed' && <Field label="Amount (NGN)" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />}
+      </div>
+      {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+      <PrimaryButton onClick={handleAdd} disabled={!title.trim() || (linkType === 'fixed' && !amount) || loading} className="mt-6">
+        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add to page'}
+      </PrimaryButton>
+    </div>
+  );
+}
+
+function BusinessDashboardApp() {
+  const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | app
+  const [business, setBusiness] = useState(null); // null = loading, false = none yet
+  const [balance, setBalance] = useState(0);
+  const [products, setProducts] = useState([]);
+  const [view, setView] = useState('dashboard'); // dashboard | addProduct
+  const [copied, setCopied] = useState(false);
+
+  const loadAll = async (userId) => {
+    const { data: wallet } = await getWallet(userId);
+    setBalance(wallet?.balance || 0);
+    const { data: biz } = await getMyBusiness(userId);
+    setBusiness(biz || false);
+    if (biz) {
+      const { data: prods } = await getMyBusinessProducts(biz.id);
+      setProducts(prods || []);
+    }
+  };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        loadAll(session.user.id).then(() => setScreen('app'));
+      } else {
+        setScreen('login');
+      }
+    });
+  }, []);
+
+  const handleAuthed = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await loadAll(session.user.id);
+      setScreen('app');
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut();
+    setScreen('login');
+  };
+
+  if (screen === 'splash') {
+    return <div className="min-h-screen bg-black flex items-center justify-center"><LogoMark size={36} /></div>;
+  }
+
+  if (screen === 'login' || screen === 'signup' || screen === 'forgot') {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center px-5">
+        {screen === 'login' && <LoginScreen onLogin={handleAuthed} goSignup={() => setScreen('signup')} goForgot={() => setScreen('forgot')} isDashboard />}
+        {screen === 'signup' && <SignupScreen onSignup={handleAuthed} goLogin={() => setScreen('login')} isDashboard />}
+        {screen === 'forgot' && <ForgotScreen onSent={() => setScreen('login')} goLogin={() => setScreen('login')} isDashboard />}
+      </div>
+    );
+  }
+
+  if (business === null) {
+    return <div className="min-h-screen bg-black flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
+  }
+
+  if (business === false) {
+    return <CreateBusinessScreen onCreated={(biz) => { setBusiness(biz); setProducts([]); }} />;
+  }
+
+  const storefrontUrl = `https://business.tranxact.co/${business.slug}`;
+
+  if (view === 'addProduct') {
+    return (
+      <div className="min-h-screen bg-black text-white">
+        <AddProductScreen
+          business={business}
+          onBack={() => setView('dashboard')}
+          onAdded={async () => {
+            const { data: prods } = await getMyBusinessProducts(business.id);
+            setProducts(prods || []);
+            setView('dashboard');
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <div className="max-w-lg mx-auto px-5 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-2.5">
+            <LogoMark size={20} />
+            <div>
+              <div className="font-bold text-sm">{business.name}</div>
+              <div className="text-xs text-violet-400">Business</div>
+            </div>
+          </div>
+          <button onClick={handleLogout}><LogOut className="w-4 h-4 text-neutral-500" /></button>
+        </div>
+
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-4">
+          <div className="text-xs text-neutral-500 mb-1">Balance</div>
+          <div className="text-2xl font-bold font-mono mb-1">{fmtNaira(balance)}</div>
+          <p className="text-[11px] text-neutral-600">Same balance as your Tranxact app — not separated yet.</p>
+        </div>
+
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6">
+          <div className="text-xs text-neutral-500 mb-2">Your page</div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm text-violet-400 font-mono truncate">{storefrontUrl.replace('https://', '')}</span>
+            <button
+              onClick={() => { navigator.clipboard?.writeText(storefrontUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+              className="text-xs bg-neutral-800 rounded-lg px-3 py-1.5 flex-shrink-0 flex items-center gap-1.5"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">Your products</h2>
+          <button onClick={() => setView('addProduct')} className="text-xs text-violet-400 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add</button>
+        </div>
+        {products.length === 0 ? (
+          <p className="text-sm text-neutral-600 py-6 text-center">Nothing added yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {products.map((p) => (
+              <div key={p.id} className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{p.title}</div>
+                  <div className="text-xs text-neutral-500">{p.product_type} · {p.status}</div>
+                </div>
+                <div className="text-sm font-mono flex-shrink-0">{p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // The single real entry point. Decides which experience to render based on
 // which domain someone's actually on — same codebase, same auth, same data,
 // just a different front door. pay.tranxact.co gets the merchant dashboard;
-// everything else gets the normal mobile-first app.
+// business.tranxact.co gets the business dashboard (or, at a /{slug} path,
+// the public storefront); everything else gets the normal mobile-first app.
 export default function TranxactApp() {
-  const isPayDashboard = typeof window !== 'undefined' && window.location.hostname.startsWith('pay.');
-  return isPayDashboard ? <WebDashboardApp /> : <MobileAppRoot />;
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+
+  if (hostname.startsWith('pay.')) return <WebDashboardApp />;
+
+  if (hostname.startsWith('business.')) {
+    const slug = pathname.replace(/^\//, '').split('/')[0];
+    return slug ? <BusinessStorefrontScreen slug={slug} /> : <BusinessDashboardApp />;
+  }
+
+  return <MobileAppRoot />;
 }
