@@ -235,6 +235,13 @@ export async function adminSweepEvm(action, username, asset, network) {
   return callAdminFunction('admin-sweep-evm', { action, username, asset, network });
 }
 
+// Read-only, safe — checks a real TRX or USDT-TRC20 balance. Sweeping on
+// Tron isn't built yet (needs real transaction signing, a separate,
+// harder piece than balance-checking).
+export async function adminCheckTronBalance(username, asset) {
+  return callAdminFunction('admin-check-tron-balance', { username, asset });
+}
+
 // Every existing account has a null full_name because the signup trigger
 // never read it from metadata (now fixed for new signups) — this is how an
 // existing account fills theirs in.
