@@ -10,7 +10,7 @@ import {
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
-  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm,
+  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
@@ -1955,6 +1955,11 @@ function AdminScreen() {
   const [swConfirmingSweep, setSwConfirmingSweep] = useState(false);
   const [swSweeping, setSwSweeping] = useState(false);
   const [swSweepResult, setSwSweepResult] = useState(null);
+  const [trUsername, setTrUsername] = useState('');
+  const [trAsset, setTrAsset] = useState('TRX');
+  const [trChecking, setTrChecking] = useState(false);
+  const [trResult, setTrResult] = useState(null);
+  const [trError, setTrError] = useState('');
 
   const loadStats = async () => {
     try {
@@ -2047,6 +2052,20 @@ function AdminScreen() {
     } finally {
       setSwSweeping(false);
       setSwConfirmingSweep(false);
+    }
+  };
+
+  const checkTronBalance = async () => {
+    setTrError('');
+    setTrResult(null);
+    setTrChecking(true);
+    try {
+      const res = await adminCheckTronBalance(trUsername.trim().toLowerCase().replace(/^@/, ''), trAsset);
+      setTrResult(res);
+    } catch (e) {
+      setTrError(e.message);
+    } finally {
+      setTrChecking(false);
     }
   };
 
@@ -2720,6 +2739,36 @@ function AdminScreen() {
               <div className="text-xs">Amount: <span className="font-mono">{swSweepResult.amount}</span></div>
               <div className="text-[11px] text-neutral-500 break-all">Tx: {swSweepResult.tx_hash}</div>
               {swSweepResult.gas_funding_tx_hash && <div className="text-[11px] text-neutral-500 break-all">Gas funding tx: {swSweepResult.gas_funding_tx_hash}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-1">Tron Balance Check (read-only)</h2>
+        <p className="text-xs text-neutral-500 mb-3">TRX and USDT-TRC20 balance lookup. Sweeping isn't built for Tron yet — this only confirms what's actually there.</p>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <input
+              value={trUsername}
+              onChange={e => { setTrUsername(e.target.value); setTrResult(null); setTrError(''); }}
+              placeholder="username"
+              className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+            />
+            <select value={trAsset} onChange={e => { setTrAsset(e.target.value); setTrResult(null); }} className="bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2.5 text-sm text-white">
+              <option value="TRX">TRX</option>
+              <option value="USDT">USDT</option>
+            </select>
+          </div>
+          <button onClick={checkTronBalance} disabled={trChecking || !trUsername.trim()} className="w-full bg-neutral-800 rounded-lg py-2.5 text-sm font-semibold disabled:opacity-40">
+            {trChecking ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Check Balance'}
+          </button>
+          {trError && <p className="text-xs text-red-400 mt-2">{trError}</p>}
+          {trResult && (
+            <div className="mt-3 bg-black/40 border border-neutral-800 rounded-lg p-3 space-y-1.5">
+              <div className="text-[11px] text-neutral-500">Address</div>
+              <div className="text-xs font-mono break-all mb-2">{trResult.address}</div>
+              <div className="text-xs">Balance: <span className="font-mono">{trResult.balance} {trResult.asset}</span></div>
             </div>
           )}
         </div>
