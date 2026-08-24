@@ -285,7 +285,7 @@ export async function updatePushPreference(enabled) {
   return true;
 }
 
-export async function createPaymentLink({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date }) {
+export async function createPaymentLink({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type }) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
 
@@ -295,11 +295,78 @@ export async function createPaymentLink({ title, description, link_type, amount,
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date }),
+    body: JSON.stringify({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to create payment link');
   return data; // { success, id, slug, url }
+}
+
+// ---------- Business platform ----------
+// Same backend, same auth as the rest of the app — a business is just a
+// profile owned by an existing user_id. Products/services/events reuse
+// payment_links entirely (see createPaymentLink above), so checkout, crypto,
+// naira, and admin settlement all work identically with zero new payment code.
+
+// Uploads into the user's own folder in the business-assets bucket — RLS
+// requires the path's first segment to match auth.uid(), enforced server-side,
+// not just trusted client-side. Returns the public URL, ready to store
+// directly as logo_url or image_url.
+export async function uploadBusinessAsset(file) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const ext = file.name.split('.').pop() || 'jpg';
+  const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage.from('business-assets').upload(path, file, { cacheControl: '3600', upsert: false });
+  if (error) throw new Error(error.message);
+  const { data } = supabase.storage.from('business-assets').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function isBusinessSlugAvailable(slug) {
+  const { data, error } = await supabase.rpc('is_business_slug_available', { p_slug: slug.trim().toLowerCase() });
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+export async function createBusiness({ name, slug, description }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const { data, error } = await supabase
+    .from('businesses')
+    .insert({ user_id: session.user.id, name: name.trim(), slug: slug.trim().toLowerCase(), description: description || null })
+    .select('id, slug, name, description, logo_url')
+    .single();
+  if (error) throw new Error(error.code === '23505' ? 'That link is already taken' : error.message);
+  return data;
+}
+
+export async function getMyBusiness(userId) {
+  const { data, error } = await supabase.from('businesses').select('*').eq('user_id', userId).maybeSingle();
+  return { data, error };
+}
+
+export async function updateBusiness(businessId, updates) {
+  const { error } = await supabase.from('businesses').update(updates).eq('id', businessId);
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+export async function getMyBusinessProducts(businessId) {
+  const { data, error } = await supabase
+    .from('payment_links')
+    .select('id, slug, title, description, link_type, amount, status, product_type, image_url, created_at')
+    .eq('business_id', businessId)
+    .order('created_at', { ascending: false });
+  return { data, error };
+}
+
+// Public, no auth required — the actual customer-facing storefront.
+export async function getBusinessStorefront(slug) {
+  const { data, error } = await supabase.rpc('get_business_storefront', { p_slug: slug.trim().toLowerCase() });
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('Business not found');
+  return data;
 }
 
 export async function submitSalesLead({ name, email, message }) {
