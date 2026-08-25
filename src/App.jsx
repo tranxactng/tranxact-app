@@ -3,7 +3,7 @@ import {
   Eye, EyeOff, Bell, ArrowDownToLine, ArrowUpFromLine, Link2, Smartphone, Wifi, Zap, Tv,
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
-  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText
+  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -3635,6 +3635,7 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
   const navItems = [
     { key: 'overview', label: 'Overview', icon: LineChart },
     { key: 'links', label: 'Payment Links', icon: Link2 },
+    { key: 'storefront', label: 'Storefront', icon: ShoppingBag },
     { key: 'analytics', label: 'Analytics', icon: BarChart3 },
     { key: 'transactions', label: 'Transactions', icon: Wallet },
     { key: 'withdrawals', label: 'Withdrawals', icon: ArrowUpFromLine },
@@ -3978,6 +3979,53 @@ function DashboardAnalytics({ analytics }) {
           </div>
         </div>
       </div>
+
+      {analytics.daily_volume && (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mt-4">
+          <h2 className="text-sm font-semibold mb-1">Last 14 days</h2>
+          <p className="text-xs text-neutral-600 mb-5">Real settled volume, day by day.</p>
+          {(() => {
+            const max = Math.max(...analytics.daily_volume.map(d => d.amount), 1);
+            return (
+              <div className="flex items-end gap-1.5 h-32">
+                {analytics.daily_volume.map((d) => {
+                  const heightPct = Math.max((d.amount / max) * 100, d.amount > 0 ? 4 : 1);
+                  const label = new Date(d.date + 'T00:00:00Z').toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
+                  return (
+                    <div key={d.date} className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                      <div className="text-[9px] text-neutral-600 mb-1 opacity-0 group-hover:opacity-100 transition whitespace-nowrap absolute -top-4">
+                        {fmtNaira(d.amount)}
+                      </div>
+                      <div
+                        className={`w-full rounded-t-sm transition ${d.amount > 0 ? 'bg-violet-500' : 'bg-neutral-900'}`}
+                        style={{ height: `${heightPct}%` }}
+                      />
+                      <div className="text-[8px] text-neutral-700 mt-1.5">{label.split(' ')[0]}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {analytics.top_links && analytics.top_links.length > 0 && (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mt-4">
+          <h2 className="text-sm font-semibold mb-4">Top performing links</h2>
+          <div className="space-y-3">
+            {analytics.top_links.map((l, i) => (
+              <div key={i} className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{l.title}</div>
+                  <div className="text-xs text-neutral-600">{l.count} payment{l.count === 1 ? '' : 's'}</div>
+                </div>
+                <div className="text-sm font-mono flex-shrink-0 ml-3">{fmtNaira(l.amount)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4107,6 +4155,7 @@ function DashboardWithdrawals({ balance, withdrawals, onRequest, requesting, req
 function WebDashboardApp() {
   const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | app
   const [tab, setTab] = useState('overview');
+  const [userId, setUserId] = useState(null);
   const [balance, setBalance] = useState(0);
   const [links, setLinks] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -4134,6 +4183,7 @@ function WebDashboardApp() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
+        setUserId(session.user.id);
         loadAll(session.user.id).then(() => setScreen('app'));
       } else {
         setScreen('login');
@@ -4144,6 +4194,7 @@ function WebDashboardApp() {
   const handleAuthed = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
+      setUserId(session.user.id);
       await loadAll(session.user.id);
       setScreen('app');
     }
@@ -4205,6 +4256,7 @@ function WebDashboardApp() {
     <DashboardShell tab={tab} setTab={setTab} onLogout={handleLogout}>
       {tab === 'overview' && <DashboardOverview balance={balance} totalReceived={totalReceived} paymentCount={payments.length} />}
       {tab === 'links' && <DashboardLinks links={links} onCreate={handleCreateLink} creating={creating} createError={createError} />}
+      {tab === 'storefront' && <DashboardStorefront userId={userId} />}
       {tab === 'analytics' && <DashboardAnalytics analytics={analytics} />}
       {tab === 'transactions' && <DashboardTransactions transactions={transactions} />}
       {tab === 'withdrawals' && (
@@ -4236,6 +4288,12 @@ function MobileAppRoot() {
   const initializedRef = React.useRef(false);
   const referralFromUrl = React.useRef(
     typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('ref') : null
+  ).current;
+  // Separate from referral codes on purpose — a ?signup=1 link shouldn't be
+  // treated as an actual referral attribution, just an intent to land on
+  // the signup form instead of login.
+  const signupIntent = React.useRef(
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('signup') === '1' : false
   ).current;
 
   const loadUserData = async (userId) => {
@@ -4269,7 +4327,7 @@ function MobileAppRoot() {
         await loadUserData(session.user.id);
         setScreen(hasSeenWelcome(session) ? 'app' : 'welcome');
       } else {
-        setScreen(referralFromUrl ? 'signup' : 'login');
+        setScreen((referralFromUrl || signupIntent) ? 'signup' : 'login');
       }
       initializedRef.current = true;
     };
@@ -4549,14 +4607,13 @@ function CreateBusinessScreen({ onCreated }) {
   const canCreate = name.trim() && slug.trim().length >= 3 && slugStatus === 'available';
 
   return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center px-5">
-      <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2.5 mb-8 justify-center">
-          <LogoMark size={22} />
-          <span className="font-bold text-lg">Tranxact Business</span>
-        </div>
-        <h1 className="text-xl font-bold mb-1 text-center">Create your business</h1>
-        <p className="text-sm text-neutral-500 text-center mb-8">Sell products, services, or events with your own page.</p>
+    <div className="max-w-sm">
+      <div className="flex items-center gap-2.5 mb-8">
+        <LogoMark size={22} />
+        <span className="font-bold text-lg">Tranxact Business</span>
+      </div>
+      <h1 className="text-xl font-bold mb-1">Create your business</h1>
+      <p className="text-sm text-neutral-500 mb-8">Sell products, services, or events with your own page.</p>
 
         <div className="space-y-4">
           <label className="block">
@@ -4604,7 +4661,6 @@ function CreateBusinessScreen({ onCreated }) {
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create business'}
         </PrimaryButton>
       </div>
-    </div>
   );
 }
 
@@ -4704,17 +4760,17 @@ function AddProductScreen({ business, onBack, onAdded }) {
   );
 }
 
-function BusinessDashboardApp() {
-  const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | app
+// Lives as a tab inside WebDashboardApp — no auth of its own, since by the
+// time this renders, WebDashboardApp has already confirmed a session. Same
+// underlying business/product logic as before, just without the standalone
+// login flow that only made sense when this was its own separate app.
+function DashboardStorefront({ userId }) {
   const [business, setBusiness] = useState(null); // null = loading, false = none yet
-  const [balance, setBalance] = useState(0);
   const [products, setProducts] = useState([]);
   const [view, setView] = useState('dashboard'); // dashboard | addProduct
   const [copied, setCopied] = useState(false);
 
-  const loadAll = async (userId) => {
-    const { data: wallet } = await getWallet(userId);
-    setBalance(wallet?.balance || 0);
+  const loadBusiness = async () => {
     const { data: biz } = await getMyBusiness(userId);
     setBusiness(biz || false);
     if (biz) {
@@ -4723,45 +4779,10 @@ function BusinessDashboardApp() {
     }
   };
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        loadAll(session.user.id).then(() => setScreen('app'));
-      } else {
-        setScreen('login');
-      }
-    });
-  }, []);
-
-  const handleAuthed = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      await loadAll(session.user.id);
-      setScreen('app');
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOut();
-    setScreen('login');
-  };
-
-  if (screen === 'splash') {
-    return <div className="min-h-screen bg-black flex items-center justify-center"><LogoMark size={36} /></div>;
-  }
-
-  if (screen === 'login' || screen === 'signup' || screen === 'forgot') {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center px-5">
-        {screen === 'login' && <LoginScreen onLogin={handleAuthed} goSignup={() => setScreen('signup')} goForgot={() => setScreen('forgot')} isDashboard />}
-        {screen === 'signup' && <SignupScreen onSignup={handleAuthed} goLogin={() => setScreen('login')} isDashboard />}
-        {screen === 'forgot' && <ForgotScreen onSent={() => setScreen('login')} goLogin={() => setScreen('login')} isDashboard />}
-      </div>
-    );
-  }
+  useEffect(() => { loadBusiness(); }, [userId]);
 
   if (business === null) {
-    return <div className="min-h-screen bg-black flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
+    return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
   }
 
   if (business === false) {
@@ -4772,82 +4793,66 @@ function BusinessDashboardApp() {
 
   if (view === 'addProduct') {
     return (
-      <div className="min-h-screen bg-black text-white">
-        <AddProductScreen
-          business={business}
-          onBack={() => setView('dashboard')}
-          onAdded={async () => {
-            const { data: prods } = await getMyBusinessProducts(business.id);
-            setProducts(prods || []);
-            setView('dashboard');
-          }}
-        />
-      </div>
+      <AddProductScreen
+        business={business}
+        onBack={() => setView('dashboard')}
+        onAdded={async () => {
+          const { data: prods } = await getMyBusinessProducts(business.id);
+          setProducts(prods || []);
+          setView('dashboard');
+        }}
+      />
     );
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="max-w-lg mx-auto px-5 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-2.5">
-            <LogoMark size={20} />
-            <div>
-              <div className="font-bold text-sm">{business.name}</div>
-              <div className="text-xs text-violet-400">Business</div>
-            </div>
-          </div>
-          <button onClick={handleLogout}><LogOut className="w-4 h-4 text-neutral-500" /></button>
-        </div>
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Storefront</h1>
+      <p className="text-sm text-neutral-500 mb-6">{business.name} — sell products, services, or events with a shareable page.</p>
 
-        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-4">
-          <div className="text-xs text-neutral-500 mb-1">Balance</div>
-          <div className="text-2xl font-bold font-mono mb-1">{fmtNaira(balance)}</div>
-          <p className="text-[11px] text-neutral-600">Same balance as your Tranxact app — not separated yet.</p>
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6 max-w-md">
+        <div className="text-xs text-neutral-500 mb-2">Your page</div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-violet-400 font-mono truncate">{storefrontUrl.replace('https://', '')}</span>
+          <button
+            onClick={() => { navigator.clipboard?.writeText(storefrontUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+            className="text-xs bg-neutral-800 rounded-lg px-3 py-1.5 flex-shrink-0 flex items-center gap-1.5"
+          >
+            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Copied' : 'Copy'}
+          </button>
         </div>
-
-        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6">
-          <div className="text-xs text-neutral-500 mb-2">Your page</div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm text-violet-400 font-mono truncate">{storefrontUrl.replace('https://', '')}</span>
-            <button
-              onClick={() => { navigator.clipboard?.writeText(storefrontUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-              className="text-xs bg-neutral-800 rounded-lg px-3 py-1.5 flex-shrink-0 flex items-center gap-1.5"
-            >
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Your products</h2>
-          <button onClick={() => setView('addProduct')} className="text-xs text-violet-400 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add</button>
-        </div>
-        {products.length === 0 ? (
-          <p className="text-sm text-neutral-600 py-6 text-center">Nothing added yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {products.map((p) => (
-              <div key={p.id} className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{p.title}</div>
-                  <div className="text-xs text-neutral-500">{p.product_type} · {p.status}</div>
-                </div>
-                <div className="text-sm font-mono flex-shrink-0">{p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}</div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
+
+      <div className="flex items-center justify-between mb-3 max-w-md">
+        <h2 className="text-sm font-semibold">Your products</h2>
+        <button onClick={() => setView('addProduct')} className="text-xs text-violet-400 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add</button>
+      </div>
+      {products.length === 0 ? (
+        <p className="text-sm text-neutral-600 py-6 text-center max-w-md">Nothing added yet.</p>
+      ) : (
+        <div className="space-y-2 max-w-md">
+          {products.map((p) => (
+            <div key={p.id} className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{p.title}</div>
+                <div className="text-xs text-neutral-500">{p.product_type} · {p.status}</div>
+              </div>
+              <div className="text-sm font-mono flex-shrink-0">{p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // The single real entry point. Decides which experience to render based on
 // which domain someone's actually on — same codebase, same auth, same data,
-// just a different front door. pay.tranxact.co gets the merchant dashboard;
-// business.tranxact.co gets the business dashboard (or, at a /{slug} path,
-// the public storefront); everything else gets the normal mobile-first app.
+// just a different front door. pay.tranxact.co gets the merchant dashboard
+// (storefront management now lives there too, as a tab); business.tranxact.co
+// is purely a public storefront viewer — no login, no dashboard, just what a
+// customer sees when they open a shared link; everything else gets the
+// normal mobile-first app.
 export default function TranxactApp() {
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
@@ -4856,7 +4861,7 @@ export default function TranxactApp() {
 
   if (hostname.startsWith('business.')) {
     const slug = pathname.replace(/^\//, '').split('/')[0];
-    return slug ? <BusinessStorefrontScreen slug={slug} /> : <BusinessDashboardApp />;
+    return <BusinessStorefrontScreen slug={slug} />;
   }
 
   return <MobileAppRoot />;
