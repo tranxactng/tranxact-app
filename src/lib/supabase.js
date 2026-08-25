@@ -414,7 +414,23 @@ export async function getMyPaymentLinks() {
 }
 
 // Public — works without auth, for the checkout page
+export async function ensureCryptoAddresses(slug) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/ensure-crypto-addresses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to prepare crypto addresses');
+  return data.addresses; // { "BTC-BTC": "...", "USDT-TRC20": "...", ... }
+}
+
+// Every registered user's wallet includes every supported coin from the
+// moment they sign up, not just whatever they've happened to open Receive
+// for — this guarantees the full set exists before checkout ever reads it,
+// rather than showing only whatever partial set happened to exist already.
 export async function getPublicPaymentLink(slug) {
+  await ensureCryptoAddresses(slug).catch(() => {}); // best-effort — link may not even use crypto
   const { data, error } = await supabase.rpc('get_payment_link', { p_slug: slug });
   if (error) throw new Error(error.message);
   return data && data[0] ? data[0] : null;
