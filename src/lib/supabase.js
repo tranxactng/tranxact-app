@@ -285,7 +285,7 @@ export async function updatePushPreference(enabled) {
   return true;
 }
 
-export async function createPaymentLink({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type }) {
+export async function createPaymentLink({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type, inventory }) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
 
@@ -295,11 +295,56 @@ export async function createPaymentLink({ title, description, link_type, amount,
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type }),
+    body: JSON.stringify({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type, inventory }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to create payment link');
   return data; // { success, id, slug, url }
+}
+
+// Ticket tiers are just multiple payment_links sharing one event_id — this
+// creates the event and every tier's real, checkout-ready link in one call.
+export async function createStorefrontEvent({ business_id, name, description, image_url, venue, location, event_date, event_time, tiers }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/create-storefront-event`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ business_id, name, description, image_url, venue, location, event_date, event_time, tiers }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to create event');
+  return data; // { success, event_id, tiers }
+}
+
+async function callManageStorefrontItem(payload) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/manage-storefront-item`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+export async function updateStorefrontItem(id, updates) {
+  return callManageStorefrontItem({ action: 'update', id, ...updates });
+}
+export async function setStorefrontItemStatus(id, status) {
+  return callManageStorefrontItem({ action: 'set_status', id, status });
+}
+export async function deleteStorefrontItem(id) {
+  return callManageStorefrontItem({ action: 'delete', id });
+}
+export async function duplicateStorefrontItem(id) {
+  return callManageStorefrontItem({ action: 'duplicate', id });
 }
 
 // ---------- Business platform ----------
@@ -355,7 +400,7 @@ export async function updateBusiness(businessId, updates) {
 export async function getMyBusinessProducts(businessId) {
   const { data, error } = await supabase
     .from('payment_links')
-    .select('id, slug, title, description, link_type, amount, status, product_type, image_url, created_at')
+    .select('id, slug, title, description, link_type, amount, status, product_type, image_url, inventory, created_at')
     .eq('business_id', businessId)
     .order('created_at', { ascending: false });
   return { data, error };
