@@ -15,7 +15,8 @@ import {
   changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
-  createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
+  createPaymentLink, createStorefrontEvent, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
+  updateStorefrontItem, setStorefrontItemStatus, deleteStorefrontItem, duplicateStorefrontItem,
   isBusinessSlugAvailable, createBusiness, getMyBusiness, updateBusiness, getMyBusinessProducts, getBusinessStorefront, uploadBusinessAsset,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
   listPaystackBanks, resolveBankAccount,
@@ -1117,7 +1118,7 @@ function CryptoReceivePanel() {
                 </button>
               ))}
             </div>
-            <p className="text-xs text-amber-300/80 mt-4">Pick the wrong network and the funds may be unrecoverable — match this to what your exchange or wallet actually sends on.</p>
+            <p className="text-xs text-amber-300/80 mt-4">Pick the wrong network and the funds may be unrecoverable. Match this to what your exchange or wallet actually sends on.</p>
           </div>
         ) : (
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 flex flex-col items-center">
@@ -2615,7 +2616,7 @@ function AdminScreen() {
 
       <div>
         <h2 className="text-sm font-semibold mb-1 text-amber-400">Reveal Deposit Private Key</h2>
-        <p className="text-xs text-neutral-500 mb-3">Extremely sensitive — this returns a real key controlling real funds. The backend re-derives and verifies the address before returning anything.</p>
+        <p className="text-xs text-neutral-500 mb-3">Extremely sensitive: this returns a real key controlling real funds. The backend re-derives and verifies the address before returning anything.</p>
         <div className="bg-neutral-950 border border-amber-500/30 rounded-2xl p-4">
           <div className="grid grid-cols-2 gap-2 mb-3">
             <input
@@ -2658,7 +2659,7 @@ function AdminScreen() {
           {pkResult && (
             <div className="mt-3 bg-black/40 border border-amber-500/20 rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2 text-xs text-emerald-400">
-                <Check className="w-3.5 h-3.5" /> Address verified — matches what's on record
+                <Check className="w-3.5 h-3.5" /> Address verified, matches what's on record
               </div>
               <div>
                 <div className="text-[11px] text-neutral-500">Address</div>
@@ -2675,7 +2676,7 @@ function AdminScreen() {
       </div>
 
       <div>
-        <h2 className="text-sm font-semibold mb-1">Sweep to Treasury (EVM only — ETH/BNB)</h2>
+        <h2 className="text-sm font-semibold mb-1">Sweep to Treasury (EVM only: ETH/BNB)</h2>
         <p className="text-xs text-neutral-500 mb-3">Checking a balance is read-only and safe. Sweeping broadcasts a real transaction. Bitcoin isn't supported here yet.</p>
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
           <div className="grid grid-cols-3 gap-2 mb-3">
@@ -2747,7 +2748,7 @@ function AdminScreen() {
 
       <div>
         <h2 className="text-sm font-semibold mb-1">Tron Balance Check (read-only)</h2>
-        <p className="text-xs text-neutral-500 mb-3">TRX and USDT-TRC20 balance lookup. Sweeping isn't built for Tron yet — this only confirms what's actually there.</p>
+        <p className="text-xs text-neutral-500 mb-3">TRX and USDT-TRC20 balance lookup. Sweeping isn't built for Tron yet, this only confirms what's actually there.</p>
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
           <div className="grid grid-cols-2 gap-2 mb-3">
             <input
@@ -4313,7 +4314,7 @@ function WebDashboardApp() {
     <DashboardShell tab={tab} setTab={setTab} onLogout={handleLogout}>
       {tab === 'overview' && <DashboardOverview balance={balance} totalReceived={totalReceived} paymentCount={payments.length} />}
       {tab === 'links' && <DashboardLinks links={links} onCreate={handleCreateLink} creating={creating} createError={createError} />}
-      {tab === 'storefront' && <DashboardStorefront userId={userId} />}
+      {tab === 'storefront' && <DashboardStorefront userId={userId} setTab={setTab} />}
       {tab === 'analytics' && <DashboardAnalytics analytics={analytics} />}
       {tab === 'transactions' && <DashboardTransactions transactions={transactions} />}
       {tab === 'withdrawals' && (
@@ -4723,16 +4724,61 @@ function CreateBusinessScreen({ onCreated }) {
 }
 
 function AddProductScreen({ business, onBack, onAdded }) {
+  const [step, setStep] = useState('choose'); // choose | product | service | event | custom
+
+  if (step === 'choose') {
+    const options = [
+      { key: 'product', label: 'Product', desc: 'Something physical or digital you sell, with stock', icon: '📦' },
+      { key: 'service', label: 'Service', desc: 'What you do for people, priced fixed or flexible', icon: '🛠️' },
+      { key: 'event', label: 'Event', desc: 'Ticketed, with one or more price tiers', icon: '🎟️' },
+      { key: 'custom', label: 'Talk to Sales', desc: 'Custom pricing, no checkout, just an inquiry', icon: '💬' },
+    ];
+    return (
+      <div className="max-w-sm mx-auto px-5 py-8">
+        <BackHeader title="Add to your page" onBack={onBack} />
+        <p className="text-sm text-neutral-500 mb-5">What are you adding?</p>
+        <div className="space-y-2">
+          {options.map(o => (
+            <button
+              key={o.key}
+              onClick={() => setStep(o.key)}
+              className="w-full flex items-start gap-3 bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3.5 text-left hover:border-violet-500 transition"
+            >
+              <span className="text-xl flex-shrink-0">{o.icon}</span>
+              <div>
+                <div className="text-sm font-semibold">{o.label}</div>
+                <div className="text-xs text-neutral-500">{o.desc}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 'event') {
+    return <AddEventForm business={business} onBack={() => setStep('choose')} onAdded={onAdded} />;
+  }
+
+  return <AddSimpleItemForm kind={step} business={business} onBack={() => setStep('choose')} onAdded={onAdded} />;
+}
+
+// Handles Product, Service, and Talk to Sales — genuinely different in what
+// fields they show, not one form pretending to cover all three.
+function AddSimpleItemForm({ kind, business, onBack, onAdded }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [productType, setProductType] = useState('product');
   const [linkType, setLinkType] = useState('fixed');
   const [amount, setAmount] = useState('');
+  const [inventory, setInventory] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [imageUploading, setImageUploading] = useState(false);
   const [imageError, setImageError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const titles = { product: 'Add a product', service: 'Add a service', custom: 'Talk to Sales item' };
+  const namePlaceholders = { product: 'Brand Guide PDF', service: 'Logo Design', custom: 'Custom Enterprise Plan' };
 
   const handleImageSelect = async (e) => {
     const file = e.target.files?.[0];
@@ -4754,10 +4800,12 @@ function AddProductScreen({ business, onBack, onAdded }) {
     setLoading(true);
     try {
       await createPaymentLink({
-        title, description, link_type: linkType,
-        amount: linkType === 'fixed' ? Number(amount) : undefined,
-        business_id: business.id, product_type: productType,
+        title, description,
+        link_type: kind === 'custom' ? 'flexible' : linkType,
+        amount: kind !== 'custom' && linkType === 'fixed' ? Number(amount) : undefined,
+        business_id: business.id, product_type: kind,
         image_url: imageUrl || undefined,
+        inventory: kind === 'product' && inventory !== '' ? Number(inventory) : undefined,
       });
       onAdded();
     } catch (e) {
@@ -4767,9 +4815,11 @@ function AddProductScreen({ business, onBack, onAdded }) {
     }
   };
 
+  const canSubmit = title.trim() && (kind === 'custom' || linkType !== 'fixed' || amount);
+
   return (
     <div className="max-w-sm mx-auto px-5 py-8">
-      <BackHeader title="Add to your page" onBack={onBack} />
+      <BackHeader title={titles[kind]} onBack={onBack} />
       <div className="space-y-4">
         <label className="block">
           <span className="text-sm text-neutral-400 mb-2 block">Photo (optional)</span>
@@ -4790,29 +4840,172 @@ function AddProductScreen({ business, onBack, onAdded }) {
           </div>
           {imageError && <p className="text-xs text-red-400 mt-1.5">{imageError}</p>}
         </label>
-        <div>
-          <span className="text-sm text-neutral-400 mb-2 block">Type</span>
-          <TabToggle
-            options={[{ value: 'product', label: 'Product' }, { value: 'service', label: 'Service' }, { value: 'event', label: 'Event' }]}
-            value={productType}
-            onChange={setProductType}
-          />
-        </div>
-        <Field label="Name" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Logo Design" />
-        <Field label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's included" />
-        <div>
-          <span className="text-sm text-neutral-400 mb-2 block">Pricing</span>
-          <TabToggle
-            options={[{ value: 'fixed', label: 'Fixed amount' }, { value: 'flexible', label: 'Flexible' }]}
-            value={linkType}
-            onChange={setLinkType}
-          />
-        </div>
-        {linkType === 'fixed' && <Field label="Amount (NGN)" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />}
+        <Field label="Name" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={namePlaceholders[kind]} />
+        <Field label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} placeholder={kind === 'custom' ? "What's this about?" : "What's included"} />
+
+        {kind !== 'custom' && (
+          <>
+            <div>
+              <span className="text-sm text-neutral-400 mb-2 block">Pricing</span>
+              <TabToggle
+                options={[{ value: 'fixed', label: 'Fixed amount' }, { value: 'flexible', label: 'Flexible' }]}
+                value={linkType}
+                onChange={setLinkType}
+              />
+            </div>
+            {linkType === 'fixed' && <Field label="Amount (NGN)" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />}
+            {kind === 'product' && (
+              <Field label="Stock (optional)" type="number" value={inventory} onChange={(e) => setInventory(e.target.value)} placeholder="Leave blank if not tracking stock" />
+            )}
+          </>
+        )}
+        {kind === 'custom' && (
+          <p className="text-xs text-neutral-600 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5">No price is set here. Customers see a "Talk to Sales" button that opens a chat with you directly, instead of a checkout.</p>
+        )}
       </div>
       {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
-      <PrimaryButton onClick={handleAdd} disabled={!title.trim() || (linkType === 'fixed' && !amount) || loading} className="mt-6">
+      <PrimaryButton onClick={handleAdd} disabled={!canSubmit || loading} className="mt-6">
         {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add to page'}
+      </PrimaryButton>
+    </div>
+  );
+}
+
+// Events are structurally different — no single price, one or more ticket
+// tiers, each becoming its own real, checkout-ready payment link tied to
+// the same event.
+function AddEventForm({ business, onBack, onAdded }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [venue, setVenue] = useState('');
+  const [location, setLocation] = useState('');
+  const [eventDate, setEventDate] = useState('');
+  const [eventTime, setEventTime] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState('');
+  const [tiers, setTiers] = useState([{ name: 'General', amount: '', inventory: '' }]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageError('');
+    setImageUploading(true);
+    try {
+      const url = await uploadBusinessAsset(file);
+      setImageUrl(url);
+    } catch (err) {
+      setImageError(err.message);
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
+  const updateTier = (i, field, value) => {
+    setTiers(prev => prev.map((t, idx) => idx === i ? { ...t, [field]: value } : t));
+  };
+  const addTier = () => setTiers(prev => [...prev, { name: '', amount: '', inventory: '' }]);
+  const removeTier = (i) => setTiers(prev => prev.filter((_, idx) => idx !== i));
+
+  const canSubmit = name.trim() && tiers.length > 0 && tiers.every(t => t.name.trim() && t.amount);
+
+  const handleCreate = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await createStorefrontEvent({
+        business_id: business.id,
+        name, description: description || undefined,
+        image_url: imageUrl || undefined,
+        venue: venue || undefined, location: location || undefined,
+        event_date: eventDate || undefined, event_time: eventTime || undefined,
+        tiers: tiers.map(t => ({ name: t.name, amount: Number(t.amount), inventory: t.inventory !== '' ? Number(t.inventory) : undefined })),
+      });
+      onAdded();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-sm mx-auto px-5 py-8">
+      <BackHeader title="Add an event" onBack={onBack} />
+      <div className="space-y-4">
+        <label className="block">
+          <span className="text-sm text-neutral-400 mb-2 block">Cover image (optional)</span>
+          <div className="flex items-center gap-3">
+            <div className="w-16 h-16 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
+              {imageUploading ? (
+                <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
+              ) : imageUrl ? (
+                <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <ImageIcon className="w-5 h-5 text-neutral-600" />
+              )}
+            </div>
+            <label className="text-xs bg-neutral-800 rounded-lg px-3 py-2 cursor-pointer">
+              {imageUrl ? 'Change' : 'Upload'}
+              <input type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+            </label>
+          </div>
+          {imageError && <p className="text-xs text-red-400 mt-1.5">{imageError}</p>}
+        </label>
+        <Field label="Event name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Design Workshop" />
+        <Field label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What to expect" />
+        <Field label="Venue (optional)" value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="The Yard, Lekki" />
+        <Field label="Location (optional)" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Lagos, Nigeria" />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Date (optional)" type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+          <Field label="Time (optional)" type="time" value={eventTime} onChange={(e) => setEventTime(e.target.value)} />
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-neutral-400">Ticket types</span>
+            <button onClick={addTier} className="text-xs text-violet-400 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add type</button>
+          </div>
+          <div className="space-y-3">
+            {tiers.map((tier, i) => (
+              <div key={i} className="bg-neutral-950 border border-neutral-800 rounded-xl p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={tier.name}
+                    onChange={(e) => updateTier(i, 'name', e.target.value)}
+                    placeholder="e.g. VIP"
+                    className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
+                  />
+                  {tiers.length > 1 && (
+                    <button onClick={() => removeTier(i)} className="text-neutral-600 p-1"><X className="w-4 h-4" /></button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    value={tier.amount}
+                    onChange={(e) => updateTier(i, 'amount', e.target.value)}
+                    placeholder="Price (NGN)"
+                    className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
+                  />
+                  <input
+                    type="number"
+                    value={tier.inventory}
+                    onChange={(e) => updateTier(i, 'inventory', e.target.value)}
+                    placeholder="Tickets (optional)"
+                    className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+      <PrimaryButton onClick={handleCreate} disabled={!canSubmit || loading} className="mt-6">
+        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create event'}
       </PrimaryButton>
     </div>
   );
@@ -4829,8 +5022,17 @@ function DashboardSettings({ userId }) {
   const [business, setBusiness] = useState(null); // null = loading, false = none yet
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [logoUploading, setLogoUploading] = useState(false);
+  const [coverUrl, setCoverUrl] = useState('');
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [instagram, setInstagram] = useState('');
+  const [twitter, setTwitter] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
+  const [status, setStatus] = useState('active');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
@@ -4841,7 +5043,16 @@ function DashboardSettings({ userId }) {
       if (data) {
         setName(data.name || '');
         setDescription(data.description || '');
+        setCategory(data.category || '');
         setLogoUrl(data.logo_url || '');
+        setCoverUrl(data.cover_image_url || '');
+        setContactPhone(data.contact_phone || '');
+        setContactEmail(data.contact_email || '');
+        const social = data.social_links || {};
+        setInstagram(social.instagram || '');
+        setTwitter(social.twitter || '');
+        setWhatsapp(social.whatsapp || '');
+        setStatus(data.status || 'active');
       }
     });
   }, [userId]);
@@ -4860,12 +5071,32 @@ function DashboardSettings({ userId }) {
     }
   };
 
+  const handleCoverSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCoverUploading(true);
+    try {
+      const url = await uploadBusinessAsset(file);
+      setCoverUrl(url);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCoverUploading(false);
+    }
+  };
+
   const handleSave = async () => {
     setError('');
     setSaved(false);
     setSaving(true);
     try {
-      await updateBusiness(business.id, { name, description, logo_url: logoUrl || null });
+      await updateBusiness(business.id, {
+        name, description, category: category || null,
+        logo_url: logoUrl || null, cover_image_url: coverUrl || null,
+        contact_phone: contactPhone || null, contact_email: contactEmail || null,
+        social_links: { instagram: instagram || undefined, twitter: twitter || undefined, whatsapp: whatsapp || undefined },
+        status,
+      });
       setSaved(true);
     } catch (e) {
       setError(e.message);
@@ -4891,6 +5122,19 @@ function DashboardSettings({ userId }) {
     <div className="max-w-sm">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>
 
+      <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-6 flex items-center justify-between">
+        <div>
+          <div className="text-sm font-medium">Store status</div>
+          <p className="text-xs text-neutral-500 mt-0.5">{status === 'active' ? 'Live: customers can view and buy' : 'Paused: your page shows as temporarily unavailable'}</p>
+        </div>
+        <button
+          onClick={() => setStatus(status === 'active' ? 'paused' : 'active')}
+          className={`text-xs font-semibold px-3 py-1.5 rounded-full flex-shrink-0 ${status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-400'}`}
+        >
+          {status === 'active' ? 'Active' : 'Paused'}
+        </button>
+      </div>
+
       <label className="block mb-5">
         <span className="text-sm text-neutral-400 mb-2 block">Logo</span>
         <div className="flex items-center gap-3">
@@ -4910,6 +5154,23 @@ function DashboardSettings({ userId }) {
         </div>
       </label>
 
+      <label className="block mb-5">
+        <span className="text-sm text-neutral-400 mb-2 block">Cover image</span>
+        <div className="w-full h-24 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center overflow-hidden mb-2">
+          {coverUploading ? (
+            <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
+          ) : coverUrl ? (
+            <img src={coverUrl} alt="Cover" className="w-full h-full object-cover" />
+          ) : (
+            <ImageIcon className="w-5 h-5 text-neutral-600" />
+          )}
+        </div>
+        <label className="text-xs bg-neutral-800 rounded-lg px-3 py-2 cursor-pointer inline-block">
+          {coverUrl ? 'Change' : 'Upload'}
+          <input type="file" accept="image/*" onChange={handleCoverSelect} className="hidden" />
+        </label>
+      </label>
+
       <Field label="Business name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your business name" />
       <div className="mt-4">
         <span className="text-sm text-neutral-400 mb-2 block">Description</span>
@@ -4921,6 +5182,24 @@ function DashboardSettings({ userId }) {
           className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-violet-500"
         />
       </div>
+      <div className="mt-4">
+        <Field label="Category" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Perfumes, Design, Fashion" />
+      </div>
+
+      <div className="mt-6 mb-2 text-sm font-semibold">Contact</div>
+      <Field label="Phone (optional)" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="+234..." />
+      <div className="mt-4">
+        <Field label="Email (optional)" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="you@example.com" />
+      </div>
+
+      <div className="mt-6 mb-2 text-sm font-semibold">Social links</div>
+      <Field label="Instagram (optional)" value={instagram} onChange={(e) => setInstagram(e.target.value)} placeholder="@yourbusiness" />
+      <div className="mt-4">
+        <Field label="X / Twitter (optional)" value={twitter} onChange={(e) => setTwitter(e.target.value)} placeholder="@yourbusiness" />
+      </div>
+      <div className="mt-4">
+        <Field label="WhatsApp (optional)" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="+234..." />
+      </div>
 
       {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
       <PrimaryButton onClick={handleSave} disabled={saving || !name.trim()} className="mt-6">
@@ -4930,11 +5209,66 @@ function DashboardSettings({ userId }) {
   );
 }
 
-function DashboardStorefront({ userId }) {
+// Every item here is checked against real data, nothing assumed complete.
+// Collapses to a single summary line once everything's done, so it doesn't
+// linger and clutter the page for an established store.
+function StoreSetupChecklist({ business, products, userId, onGoSettings, onGoAdd }) {
+  const [fullName, setFullName] = useState(undefined); // undefined = loading
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle()
+      .then(({ data }) => setFullName(data?.full_name || null));
+  }, [userId]);
+
+  if (fullName === undefined) return null;
+
+  const items = [
+    { label: 'Add store information', done: Boolean(business.description && business.category), onClick: onGoSettings },
+    { label: 'Add your first item', done: products.length > 0, onClick: onGoAdd },
+    { label: 'Add your name', done: Boolean(fullName), onClick: () => window.open('https://app.tranxact.co', '_blank') },
+    { label: 'Customize your page', done: Boolean(business.logo_url || business.cover_image_url), onClick: onGoSettings },
+  ];
+  const doneCount = items.filter(i => i.done).length;
+  const allDone = doneCount === items.length;
+
+  if (allDone && collapsed) return null;
+
+  return (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6 max-w-md">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-semibold">Store setup</span>
+        <span className="text-xs text-neutral-500">{doneCount} of {items.length} completed</span>
+      </div>
+      <div className="space-y-2">
+        {items.map((it, i) => (
+          <button key={i} onClick={it.done ? undefined : it.onClick} className="w-full flex items-center gap-2.5 text-left">
+            {it.done ? (
+              <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            ) : (
+              <div className="w-4 h-4 rounded-full border border-neutral-700 flex-shrink-0" />
+            )}
+            <span className={`text-sm ${it.done ? 'text-neutral-500 line-through' : 'text-neutral-300'}`}>{it.label}</span>
+          </button>
+        ))}
+      </div>
+      {allDone && (
+        <button onClick={() => setCollapsed(true)} className="text-xs text-violet-400 mt-3">Dismiss</button>
+      )}
+    </div>
+  );
+}
+
+function DashboardStorefront({ userId, setTab }) {
   const [business, setBusiness] = useState(null); // null = loading, false = none yet
   const [products, setProducts] = useState([]);
-  const [view, setView] = useState('dashboard'); // dashboard | addProduct
+  const [view, setView] = useState('dashboard'); // dashboard | addProduct | editProduct
+  const [editingItem, setEditingItem] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [menuOpenFor, setMenuOpenFor] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
+  const [actionError, setActionError] = useState('');
+  const [confirmDeleteFor, setConfirmDeleteFor] = useState(null);
 
   const loadBusiness = async () => {
     const { data: biz } = await getMyBusiness(userId);
@@ -4946,6 +5280,54 @@ function DashboardStorefront({ userId }) {
   };
 
   useEffect(() => { loadBusiness(); }, [userId]);
+
+  const refreshProducts = async () => {
+    const { data: prods } = await getMyBusinessProducts(business.id);
+    setProducts(prods || []);
+  };
+
+  const handleToggleStatus = async (item) => {
+    setActionError('');
+    setActionLoading(item.id);
+    try {
+      await setStorefrontItemStatus(item.id, item.status === 'active' ? 'paused' : 'active');
+      await refreshProducts();
+    } catch (e) {
+      setActionError(e.message);
+    } finally {
+      setActionLoading(null);
+      setMenuOpenFor(null);
+    }
+  };
+
+  const handleDuplicate = async (item) => {
+    setActionError('');
+    setActionLoading(item.id);
+    try {
+      await duplicateStorefrontItem(item.id);
+      await refreshProducts();
+    } catch (e) {
+      setActionError(e.message);
+    } finally {
+      setActionLoading(null);
+      setMenuOpenFor(null);
+    }
+  };
+
+  const handleDelete = async (item) => {
+    setActionError('');
+    setActionLoading(item.id);
+    try {
+      await deleteStorefrontItem(item.id);
+      await refreshProducts();
+    } catch (e) {
+      setActionError(e.message);
+    } finally {
+      setActionLoading(null);
+      setMenuOpenFor(null);
+      setConfirmDeleteFor(null);
+    }
+  };
 
   if (business === null) {
     return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
@@ -4962,11 +5344,17 @@ function DashboardStorefront({ userId }) {
       <AddProductScreen
         business={business}
         onBack={() => setView('dashboard')}
-        onAdded={async () => {
-          const { data: prods } = await getMyBusinessProducts(business.id);
-          setProducts(prods || []);
-          setView('dashboard');
-        }}
+        onAdded={async () => { await refreshProducts(); setView('dashboard'); }}
+      />
+    );
+  }
+
+  if (view === 'editProduct' && editingItem) {
+    return (
+      <EditItemScreen
+        item={editingItem}
+        onBack={() => { setView('dashboard'); setEditingItem(null); }}
+        onSaved={async () => { await refreshProducts(); setView('dashboard'); setEditingItem(null); }}
       />
     );
   }
@@ -4974,7 +5362,15 @@ function DashboardStorefront({ userId }) {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Storefront</h1>
-      <p className="text-sm text-neutral-500 mb-6">{business.name} — sell products, services, or events with a shareable page.</p>
+      <p className="text-sm text-neutral-500 mb-6">{business.name}. Sell products, services, or events with a shareable page.</p>
+
+      <StoreSetupChecklist
+        business={business}
+        products={products}
+        userId={userId}
+        onGoSettings={() => setTab('settings')}
+        onGoAdd={() => setView('addProduct')}
+      />
 
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6 max-w-md">
         <div className="text-xs text-neutral-500 mb-2">Your page</div>
@@ -4993,21 +5389,151 @@ function DashboardStorefront({ userId }) {
         <h2 className="text-sm font-semibold">Your products</h2>
         <button onClick={() => setView('addProduct')} className="text-xs text-violet-400 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add</button>
       </div>
+      {actionError && <p className="text-xs text-red-400 mb-3 max-w-md">{actionError}</p>}
       {products.length === 0 ? (
         <p className="text-sm text-neutral-600 py-6 text-center max-w-md">Nothing added yet.</p>
       ) : (
         <div className="space-y-2 max-w-md">
           {products.map((p) => (
-            <div key={p.id} className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
-              <div className="min-w-0">
-                <div className="text-sm font-medium truncate">{p.title}</div>
-                <div className="text-xs text-neutral-500">{p.product_type} · {p.status}</div>
+            <div key={p.id} className="bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium truncate">{p.title}</div>
+                  <div className="text-xs text-neutral-500">
+                    {p.product_type} · {p.status}
+                    {p.inventory !== null && p.inventory !== undefined && (
+                      p.inventory > 0
+                        ? <span> · {p.inventory} in stock</span>
+                        : <span className="text-red-400"> · Sold out</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="text-sm font-mono">{p.product_type === 'custom' ? 'Custom' : p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}</div>
+                  <button onClick={() => setMenuOpenFor(menuOpenFor === p.id ? null : p.id)} className="p-1 text-neutral-500">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                  </button>
+                </div>
               </div>
-              <div className="text-sm font-mono flex-shrink-0">{p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}</div>
+
+              {menuOpenFor === p.id && (
+                <div className="mt-3 pt-3 border-t border-neutral-900 grid grid-cols-4 gap-2">
+                  <button
+                    onClick={() => { setEditingItem(p); setView('editProduct'); }}
+                    className="text-xs bg-neutral-900 rounded-lg py-2 text-center"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleToggleStatus(p)}
+                    disabled={actionLoading === p.id}
+                    className="text-xs bg-neutral-900 rounded-lg py-2 text-center disabled:opacity-50"
+                  >
+                    {actionLoading === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : p.status === 'active' ? 'Pause' : 'Activate'}
+                  </button>
+                  <button
+                    onClick={() => handleDuplicate(p)}
+                    disabled={actionLoading === p.id}
+                    className="text-xs bg-neutral-900 rounded-lg py-2 text-center disabled:opacity-50"
+                  >
+                    Duplicate
+                  </button>
+                  {confirmDeleteFor === p.id ? (
+                    <button
+                      onClick={() => handleDelete(p)}
+                      disabled={actionLoading === p.id}
+                      className="text-xs bg-red-500/20 text-red-400 rounded-lg py-2 text-center disabled:opacity-50"
+                    >
+                      {actionLoading === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : 'Confirm?'}
+                    </button>
+                  ) : (
+                    <button onClick={() => setConfirmDeleteFor(p.id)} className="text-xs bg-neutral-900 text-red-400 rounded-lg py-2 text-center">
+                      Delete
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Simple, focused edit form — title, description, price, image, and stock
+// (only for products). Reuses the same update action for every item type.
+function EditItemScreen({ item, onBack, onSaved }) {
+  const [title, setTitle] = useState(item.title || '');
+  const [description, setDescription] = useState(item.description || '');
+  const [amount, setAmount] = useState(item.amount != null ? String(item.amount) : '');
+  const [inventory, setInventory] = useState(item.inventory != null ? String(item.inventory) : '');
+  const [imageUrl, setImageUrl] = useState(item.image_url || '');
+  const [imageUploading, setImageUploading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageUploading(true);
+    try {
+      const url = await uploadBusinessAsset(file);
+      setImageUrl(url);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await updateStorefrontItem(item.id, {
+        title, description,
+        amount: item.link_type === 'fixed' && item.product_type !== 'custom' ? Number(amount) : undefined,
+        image_url: imageUrl || null,
+        inventory: item.product_type === 'product' ? (inventory !== '' ? Number(inventory) : null) : undefined,
+      });
+      onSaved();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-sm mx-auto px-5 py-8">
+      <BackHeader title="Edit" onBack={onBack} />
+      <div className="space-y-4">
+        <label className="block">
+          <span className="text-sm text-neutral-400 mb-2 block">Photo</span>
+          <div className="flex items-center gap-3">
+            <div className="w-16 h-16 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
+              {imageUploading ? <Loader2 className="w-5 h-5 animate-spin text-neutral-500" /> : imageUrl ? <img src={imageUrl} alt="" className="w-full h-full object-cover" /> : <ImageIcon className="w-5 h-5 text-neutral-600" />}
+            </div>
+            <label className="text-xs bg-neutral-800 rounded-lg px-3 py-2 cursor-pointer">
+              Change
+              <input type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+            </label>
+          </div>
+        </label>
+        <Field label="Name" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <Field label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
+        {item.link_type === 'fixed' && item.product_type !== 'custom' && (
+          <Field label="Amount (NGN)" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        )}
+        {item.product_type === 'product' && (
+          <Field label="Stock (leave blank for unlimited)" type="number" value={inventory} onChange={(e) => setInventory(e.target.value)} />
+        )}
+      </div>
+      {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+      <PrimaryButton onClick={handleSave} disabled={!title.trim() || loading} className="mt-6">
+        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save changes'}
+      </PrimaryButton>
     </div>
   );
 }
