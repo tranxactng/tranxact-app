@@ -1041,7 +1041,7 @@ function HistoryScreen({ onBack, transactions = [], onSendAgain }) {
 // third-party token, not the real Circle-issued asset. Not enabling until
 // separately, properly verified.
 const MULTI_NETWORK_OPTIONS = { USDT: ['TRC20', 'ERC20', 'BEP20'] };
-const NETWORK_DISPLAY_NAME = { TRC20: 'TRC20 (Tron)', ERC20: 'ERC20 (Ethereum)', BEP20: 'BEP20 (BNB Smart Chain)' };
+const NETWORK_DISPLAY_NAME = { TRC20: 'TRC20 (Tron)', ERC20: 'ERC20 (Ethereum)', BEP20: 'BEP20 (BNB Smart Chain)', BTC: 'Bitcoin network', SOL: 'Solana network' };
 
 function CryptoReceivePanel() {
   const [assets, setAssets] = useState(null); // null = loading
@@ -3070,7 +3070,6 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
 
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
-const CRYPTO_NETWORK_LABEL = { BTC: 'Bitcoin network', ETH: 'Ethereum network', USDT: 'TRC20 (Tron) network', USDC: 'ERC-20 (Ethereum) network', SOL: 'Solana network', BNB: 'BEP-20 (BNB Smart Chain) network', TRX: 'TRC20 (Tron) network' };
 
 function CheckoutPage({ slug }) {
   const [link, setLink] = useState(undefined); // undefined = loading, null = not found
@@ -3078,6 +3077,7 @@ function CheckoutPage({ slug }) {
   const [flexAmount, setFlexAmount] = useState('');
   const [payTab, setPayTab] = useState('naira'); // naira | card | crypto
   const [cryptoAsset, setCryptoAsset] = useState(null);
+  const [cryptoNetwork, setCryptoNetwork] = useState(null);
   const [rates, setRates] = useState(null);
   const [copied, setCopied] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(15 * 60);
@@ -3094,8 +3094,12 @@ function CheckoutPage({ slug }) {
     getPublicPaymentLink(slug)
       .then(data => {
         setLink(data);
-        const first = data?.crypto_addresses ? Object.keys(data.crypto_addresses)[0] : null;
-        if (first) setCryptoAsset(first);
+        const firstKey = data?.crypto_addresses ? Object.keys(data.crypto_addresses)[0] : null;
+        if (firstKey) {
+          const [symbol, network] = firstKey.split('-');
+          setCryptoAsset(symbol);
+          setCryptoNetwork(network);
+        }
       })
       .catch(e => { setError(e.message); setLink(null); });
     supabase.rpc('get_public_rates').then(({ data }) => setRates(data || []));
@@ -3131,7 +3135,21 @@ function CheckoutPage({ slug }) {
     ? (parseFloat(flexAmount) || 0)
     : (rateRow && amountNgn > 0 ? amountNgn / Number(rateRow.effective_rate) : 0);
   const cryptoAmount = rateRow && rateRow.usd_market_price > 0 ? usdAmount / Number(rateRow.usd_market_price) : 0;
-  const cryptoOptions = link?.crypto_addresses ? Object.keys(link.crypto_addresses) : [];
+  // link.crypto_addresses is keyed "SYMBOL-NETWORK" (e.g. "USDT-TRC20") since
+  // some coins exist on more than one network with genuinely different
+  // addresses. Group into symbols for the primary picker, with networks
+  // available as a sub-choice only when a symbol actually has more than one.
+  const cryptoBySymbol = {};
+  if (link?.crypto_addresses) {
+    for (const key of Object.keys(link.crypto_addresses)) {
+      const [symbol, network] = key.split('-');
+      if (!cryptoBySymbol[symbol]) cryptoBySymbol[symbol] = [];
+      cryptoBySymbol[symbol].push(network);
+    }
+  }
+  const cryptoOptions = Object.keys(cryptoBySymbol);
+  const networksForSelected = cryptoAsset ? (cryptoBySymbol[cryptoAsset] || []) : [];
+  const selectedAddress = link?.crypto_addresses?.[`${cryptoAsset}-${cryptoNetwork}`];
 
   const handleSent = async (method) => {
     setSendError('');
@@ -3268,11 +3286,32 @@ function CheckoutPage({ slug }) {
                 <p className="text-sm text-neutral-500 text-center py-6">No crypto option available for this link yet.</p>
               ) : (
                 <>
-                  <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+                  <div className="grid grid-cols-4 gap-2 mb-4">
                     {cryptoOptions.map(symbol => (
-                      <button key={symbol} onClick={() => setCryptoAsset(symbol)} className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-medium border transition ${cryptoAsset === symbol ? 'bg-white text-black border-white' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}>{symbol}</button>
+                      <button
+                        key={symbol}
+                        onClick={() => { setCryptoAsset(symbol); setCryptoNetwork(cryptoBySymbol[symbol][0]); }}
+                        className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border transition ${cryptoAsset === symbol ? 'bg-white border-white' : 'bg-neutral-900 border-neutral-800'}`}
+                      >
+                        <CoinIcon symbol={symbol} size={28} />
+                        <span className={`text-xs font-medium ${cryptoAsset === symbol ? 'text-black' : 'text-neutral-400'}`}>{symbol}</span>
+                      </button>
                     ))}
                   </div>
+
+                  {networksForSelected.length > 1 && (
+                    <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+                      {networksForSelected.map(net => (
+                        <button
+                          key={net}
+                          onClick={() => setCryptoNetwork(net)}
+                          className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition ${cryptoNetwork === net ? 'bg-violet-600 text-white border-violet-600' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}
+                        >
+                          {NETWORK_DISPLAY_NAME[net] || net}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   {usdAmount > 0 && rateRow && (
                     <div className="text-center mb-4">
@@ -3283,13 +3322,13 @@ function CheckoutPage({ slug }) {
 
                   <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2.5 mb-4 flex items-start gap-2">
                     <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
-                    <p className="text-xs text-amber-300">Send only {cryptoAsset} on the {CRYPTO_NETWORK_LABEL[cryptoAsset] || 'correct network'} to this address. Sending any other asset may result in permanent loss.</p>
+                    <p className="text-xs text-amber-300">Send only {cryptoAsset} on the {NETWORK_DISPLAY_NAME[cryptoNetwork] || cryptoNetwork || 'correct network'} to this address. Sending any other asset may result in permanent loss.</p>
                   </div>
 
                   <div className="flex flex-col items-center bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
-                    <div className="bg-white rounded-lg p-2 mb-3"><BrandedQR data={link.crypto_addresses[cryptoAsset]} size={128} /></div>
-                    <button onClick={() => copy(link.crypto_addresses[cryptoAsset], 'crypto')} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5">
-                      <span className="font-mono text-xs text-neutral-300 break-all text-left">{link.crypto_addresses[cryptoAsset]}</span>
+                    <div className="bg-white rounded-lg p-2 mb-3"><BrandedQR data={selectedAddress} size={128} /></div>
+                    <button onClick={() => copy(selectedAddress, 'crypto')} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5">
+                      <span className="font-mono text-xs text-neutral-300 break-all text-left">{selectedAddress}</span>
                       {copied === 'crypto' ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 ml-2" /> : <Copy className="w-4 h-4 text-neutral-500 flex-shrink-0 ml-2" />}
                     </button>
                   </div>
@@ -3632,6 +3671,7 @@ function AppShell({ tab, setTab, isAdmin = false, children }) {
 // ---------- Root ----------
 // ---------- Web Dashboard (pay.tranxact.co) ----------
 function DashboardShell({ tab, setTab, onLogout, children }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navItems = [
     { key: 'overview', label: 'Overview', icon: LineChart },
     { key: 'links', label: 'Payment Links', icon: Link2 },
@@ -3639,6 +3679,7 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
     { key: 'analytics', label: 'Analytics', icon: BarChart3 },
     { key: 'transactions', label: 'Transactions', icon: Wallet },
     { key: 'withdrawals', label: 'Withdrawals', icon: ArrowUpFromLine },
+    { key: 'settings', label: 'Settings', icon: Settings },
   ];
   return (
     <div className="min-h-screen bg-black text-white flex flex-col md:flex-row">
@@ -3654,8 +3695,8 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
             <div className="text-[10px] text-violet-400 leading-tight">Pay Dashboard</div>
           </div>
         </div>
-        <button onClick={onLogout} className="text-red-400">
-          <LogOut className="w-4 h-4" />
+        <button onClick={() => setMobileMenuOpen(true)} className="p-1.5">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
       </div>
 
@@ -3683,21 +3724,37 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
         </button>
       </aside>
 
-      {/* Mobile bottom nav */}
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur-md border-t border-neutral-900 flex justify-around py-2.5 z-40"
-        style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}
+      {/* Mobile menu, replaces the old cramped bottom nav */}
+      <div
+        className={`md:hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm transition-opacity ${mobileMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={(e) => { if (e.target === e.currentTarget) setMobileMenuOpen(false); }}
       >
-        {navItems.map(n => (
-          <button key={n.key} onClick={() => setTab(n.key)} className="flex flex-col items-center gap-1 px-3 py-1">
-            <n.icon className={`w-5 h-5 ${tab === n.key ? 'text-white' : 'text-neutral-600'}`} />
-            <span className={`text-[10px] ${tab === n.key ? 'text-white' : 'text-neutral-600'}`}>{n.label}</span>
-            {tab === n.key && <span className="w-1 h-1 rounded-full bg-white mt-0.5" />}
+        <div
+          className={`absolute top-0 right-0 bottom-0 w-72 max-w-[85vw] bg-neutral-950 border-l border-neutral-900 flex flex-col p-5 transition-transform ${mobileMenuOpen ? 'translate-x-0' : 'translate-x-full'}`}
+          style={{ paddingTop: 'calc(1.25rem + env(safe-area-inset-top))', paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}
+        >
+          <button onClick={() => setMobileMenuOpen(false)} className="self-end p-1.5 mb-4">
+            <X className="w-5 h-5 text-neutral-400" />
           </button>
-        ))}
-      </nav>
+          <nav className="space-y-1 flex-1">
+            {navItems.map(n => (
+              <button
+                key={n.key}
+                onClick={() => { setTab(n.key); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition ${tab === n.key ? 'bg-neutral-900 text-white' : 'text-neutral-500'}`}
+              >
+                <n.icon className="w-4 h-4" />
+                {n.label}
+              </button>
+            ))}
+          </nav>
+          <button onClick={onLogout} className="flex items-center gap-2 text-red-400 text-sm px-3 py-3">
+            <LogOut className="w-4 h-4" /> Log out
+          </button>
+        </div>
+      </div>
 
-      <main className="flex-1 p-5 md:p-10 pb-24 md:pb-10 max-w-3xl mx-auto w-full">{children}</main>
+      <main className="flex-1 p-5 md:p-10 pb-10 max-w-3xl mx-auto w-full">{children}</main>
     </div>
   );
 }
@@ -4269,6 +4326,7 @@ function WebDashboardApp() {
           requestSuccess={requestSuccess}
         />
       )}
+      {tab === 'settings' && <DashboardSettings userId={userId} />}
     </DashboardShell>
   );
 }
@@ -4764,6 +4822,114 @@ function AddProductScreen({ business, onBack, onAdded }) {
 // time this renders, WebDashboardApp has already confirmed a session. Same
 // underlying business/product logic as before, just without the standalone
 // login flow that only made sense when this was its own separate app.
+// Business identity settings — name, description, logo. If no business
+// exists yet (Storefront was never set up), points there first rather than
+// showing empty fields with nothing real to save.
+function DashboardSettings({ userId }) {
+  const [business, setBusiness] = useState(null); // null = loading, false = none yet
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    getMyBusiness(userId).then(({ data }) => {
+      setBusiness(data || false);
+      if (data) {
+        setName(data.name || '');
+        setDescription(data.description || '');
+        setLogoUrl(data.logo_url || '');
+      }
+    });
+  }, [userId]);
+
+  const handleLogoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoUploading(true);
+    try {
+      const url = await uploadBusinessAsset(file);
+      setLogoUrl(url);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setError('');
+    setSaved(false);
+    setSaving(true);
+    try {
+      await updateBusiness(business.id, { name, description, logo_url: logoUrl || null });
+      setSaved(true);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (business === null) {
+    return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
+  }
+
+  if (business === false) {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-1">Settings</h1>
+        <p className="text-sm text-neutral-500">Set up your Storefront first, then your business details show up here to edit.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-sm">
+      <h1 className="text-2xl font-bold mb-6">Settings</h1>
+
+      <label className="block mb-5">
+        <span className="text-sm text-neutral-400 mb-2 block">Logo</span>
+        <div className="flex items-center gap-3">
+          <div className="w-16 h-16 rounded-2xl bg-neutral-900 border border-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
+            {logoUploading ? (
+              <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
+            ) : logoUrl ? (
+              <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
+            ) : (
+              <LogoMark size={22} />
+            )}
+          </div>
+          <label className="text-xs bg-neutral-800 rounded-lg px-3 py-2 cursor-pointer">
+            {logoUrl ? 'Change' : 'Upload'}
+            <input type="file" accept="image/*" onChange={handleLogoSelect} className="hidden" />
+          </label>
+        </div>
+      </label>
+
+      <Field label="Business name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your business name" />
+      <div className="mt-4">
+        <span className="text-sm text-neutral-400 mb-2 block">Description</span>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="What do you sell?"
+          rows={3}
+          className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+        />
+      </div>
+
+      {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+      <PrimaryButton onClick={handleSave} disabled={saving || !name.trim()} className="mt-6">
+        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? 'Saved' : 'Save changes'}
+      </PrimaryButton>
+    </div>
+  );
+}
+
 function DashboardStorefront({ userId }) {
   const [business, setBusiness] = useState(null); // null = loading, false = none yet
   const [products, setProducts] = useState([]);
