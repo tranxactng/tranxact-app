@@ -347,6 +347,47 @@ export async function duplicateStorefrontItem(id) {
   return callManageStorefrontItem({ action: 'duplicate', id });
 }
 
+export async function createCartCheckout(businessSlug, items) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/create-cart-checkout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ business_slug: businessSlug, items }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to create checkout');
+  return data; // { success, slug, total, url }
+}
+
+export async function getMyStorefrontOrders(businessId) {
+  const { data, error } = await supabase
+    .from('storefront_orders')
+    .select('id, order_number, quantity, status, customer_name, customer_contact, created_at, payment_links(title, amount, image_url)')
+    .eq('business_id', businessId)
+    .order('created_at', { ascending: false });
+  return { data, error };
+}
+
+export async function getMyStorefrontCustomers(businessId) {
+  const { data, error } = await supabase
+    .from('storefront_customers')
+    .select('id, name, contact, total_spent, order_count, last_activity_at')
+    .eq('business_id', businessId)
+    .order('total_spent', { ascending: false });
+  return { data, error };
+}
+
+// Fire-and-forget on purpose — a view counter should never block or break
+// the actual browsing experience if it fails.
+export function trackStorefrontEvent(businessSlug, eventType, itemSlug) {
+  supabase.rpc('track_storefront_event', { p_business_slug: businessSlug, p_event_type: eventType, p_item_slug: itemSlug || null }).then(() => {});
+}
+
+export async function getStorefrontAnalytics(businessId) {
+  const { data, error } = await supabase.rpc('get_storefront_analytics', { p_business_id: businessId });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 // ---------- Business platform ----------
 // Same backend, same auth as the rest of the app — a business is just a
 // profile owned by an existing user_id. Products/services/events reuse
