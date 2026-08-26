@@ -16,7 +16,7 @@ import {
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, createStorefrontEvent, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
-  updateStorefrontItem, setStorefrontItemStatus, deleteStorefrontItem, duplicateStorefrontItem,
+  updateStorefrontItem, setStorefrontItemStatus, deleteStorefrontItem, duplicateStorefrontItem, createCartCheckout, getMyStorefrontOrders, getMyStorefrontCustomers, trackStorefrontEvent, getStorefrontAnalytics,
   isBusinessSlugAvailable, createBusiness, getMyBusiness, updateBusiness, getMyBusinessProducts, getBusinessStorefront, uploadBusinessAsset,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
   listPaystackBanks, resolveBankAccount,
@@ -3079,6 +3079,7 @@ function CheckoutPage({ slug }) {
   const [payTab, setPayTab] = useState('naira'); // naira | card | crypto
   const [cryptoAsset, setCryptoAsset] = useState(null);
   const [cryptoNetwork, setCryptoNetwork] = useState(null);
+  const [coinPickerOpen, setCoinPickerOpen] = useState(false);
   const [rates, setRates] = useState(null);
   const [copied, setCopied] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(15 * 60);
@@ -3199,12 +3200,16 @@ function CheckoutPage({ slug }) {
       {link && link.status === 'active' && !notice && (
         <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6">
           <div className="flex items-center gap-3 pb-5 mb-5 border-b border-neutral-900">
-            <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
-              <Users className="w-4 h-4 text-violet-400" />
-            </div>
-            <div>
-              <p className="text-xs text-neutral-500">{link.is_tip ? 'Tipping' : 'Paying'}</p>
-              <p className="font-semibold">@{link.creator_username}</p>
+            {link.image_url ? (
+              <img src={link.image_url} alt={link.title} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
+                <Users className="w-4 h-4 text-violet-400" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-xs text-neutral-500">{link.is_tip ? 'Tipping' : 'Paying'} @{link.creator_username}</p>
+              {link.title && <p className="font-semibold truncate">{link.title}</p>}
             </div>
           </div>
 
@@ -3287,17 +3292,32 @@ function CheckoutPage({ slug }) {
                 <p className="text-sm text-neutral-500 text-center py-6">No crypto option available for this link yet.</p>
               ) : (
                 <>
-                  <div className="grid grid-cols-4 gap-2 mb-4">
-                    {cryptoOptions.map(symbol => (
-                      <button
-                        key={symbol}
-                        onClick={() => { setCryptoAsset(symbol); setCryptoNetwork(cryptoBySymbol[symbol][0]); }}
-                        className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border transition ${cryptoAsset === symbol ? 'bg-white border-white' : 'bg-neutral-900 border-neutral-800'}`}
-                      >
-                        <CoinIcon symbol={symbol} size={28} />
-                        <span className={`text-xs font-medium ${cryptoAsset === symbol ? 'text-black' : 'text-neutral-400'}`}>{symbol}</span>
-                      </button>
-                    ))}
+                  <div className="mb-4">
+                    <button
+                      onClick={() => setCoinPickerOpen(!coinPickerOpen)}
+                      className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <CoinIcon symbol={cryptoAsset} size={24} />
+                        <span className="text-sm font-medium">Pay with {cryptoAsset}</span>
+                      </div>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={`w-4 h-4 text-neutral-500 transition-transform ${coinPickerOpen ? 'rotate-180' : ''}`}><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
+
+                    {coinPickerOpen && (
+                      <div className="mt-2 bg-neutral-900 border border-neutral-800 rounded-xl p-2 grid grid-cols-4 gap-2">
+                        {cryptoOptions.map(symbol => (
+                          <button
+                            key={symbol}
+                            onClick={() => { setCryptoAsset(symbol); setCryptoNetwork(cryptoBySymbol[symbol][0]); setCoinPickerOpen(false); }}
+                            className={`flex flex-col items-center gap-1.5 py-3 rounded-lg transition ${cryptoAsset === symbol ? 'bg-white' : 'bg-neutral-950'}`}
+                          >
+                            <CoinIcon symbol={symbol} size={24} />
+                            <span className={`text-xs font-medium ${cryptoAsset === symbol ? 'text-black' : 'text-neutral-400'}`}>{symbol}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {networksForSelected.length > 1 && (
@@ -3677,6 +3697,8 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
     { key: 'overview', label: 'Overview', icon: LineChart },
     { key: 'links', label: 'Payment Links', icon: Link2 },
     { key: 'storefront', label: 'Storefront', icon: ShoppingBag },
+    { key: 'orders', label: 'Orders', icon: FileText },
+    { key: 'customers', label: 'Customers', icon: UserCircle },
     { key: 'analytics', label: 'Analytics', icon: BarChart3 },
     { key: 'transactions', label: 'Transactions', icon: Wallet },
     { key: 'withdrawals', label: 'Withdrawals', icon: ArrowUpFromLine },
@@ -3975,7 +3997,21 @@ function DashboardLinks({ links, onCreate, creating, createError }) {
   );
 }
 
-function DashboardAnalytics({ analytics }) {
+function DashboardAnalytics({ analytics, userId }) {
+  const [storeAnalytics, setStoreAnalytics] = useState(undefined); // undefined = loading, null = no business
+
+  useEffect(() => {
+    getMyBusiness(userId).then(async ({ data: business }) => {
+      if (!business) { setStoreAnalytics(null); return; }
+      try {
+        const sa = await getStorefrontAnalytics(business.id);
+        setStoreAnalytics(sa);
+      } catch {
+        setStoreAnalytics(null);
+      }
+    });
+  }, [userId]);
+
   if (!analytics) {
     return (
       <div>
@@ -4082,6 +4118,38 @@ function DashboardAnalytics({ analytics }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {storeAnalytics && (
+        <div className="mt-8">
+          <h2 className="text-sm font-semibold mb-4">Storefront</h2>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <StatCard label="Store visits" value={storeAnalytics.visits} />
+            <StatCard label="Product views" value={storeAnalytics.product_views} />
+            <StatCard label="Checkouts started" value={storeAnalytics.checkout_starts} />
+            <StatCard label="Conversion rate" value={storeAnalytics.conversion_rate !== null ? `${storeAnalytics.conversion_rate}%` : '—'} sub={storeAnalytics.visits === 0 ? 'No visits tracked yet' : undefined} />
+          </div>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-4">
+            <div className="text-xs text-neutral-500 mb-2">Storefront revenue</div>
+            <div className="font-mono text-2xl font-bold">{fmtNaira(storeAnalytics.revenue)}</div>
+            <div className="text-xs text-neutral-600 mt-1">{storeAnalytics.orders} order{storeAnalytics.orders === 1 ? '' : 's'}</div>
+          </div>
+          {storeAnalytics.top_products && storeAnalytics.top_products.length > 0 && (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+              <h3 className="text-sm font-semibold mb-4">Top items</h3>
+              <div className="space-y-3">
+                {storeAnalytics.top_products.map((p, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{p.title}</div>
+                      <div className="text-xs text-neutral-600">{p.order_count} order{p.order_count === 1 ? '' : 's'}</div>
+                    </div>
+                    <div className="text-sm font-mono flex-shrink-0 ml-3">{fmtNaira(p.revenue)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -4315,7 +4383,7 @@ function WebDashboardApp() {
       {tab === 'overview' && <DashboardOverview balance={balance} totalReceived={totalReceived} paymentCount={payments.length} />}
       {tab === 'links' && <DashboardLinks links={links} onCreate={handleCreateLink} creating={creating} createError={createError} />}
       {tab === 'storefront' && <DashboardStorefront userId={userId} setTab={setTab} />}
-      {tab === 'analytics' && <DashboardAnalytics analytics={analytics} />}
+      {tab === 'analytics' && <DashboardAnalytics analytics={analytics} userId={userId} />}
       {tab === 'transactions' && <DashboardTransactions transactions={transactions} />}
       {tab === 'withdrawals' && (
         <DashboardWithdrawals
@@ -4327,6 +4395,8 @@ function WebDashboardApp() {
           requestSuccess={requestSuccess}
         />
       )}
+      {tab === 'orders' && <DashboardOrders userId={userId} />}
+      {tab === 'customers' && <DashboardCustomers userId={userId} />}
       {tab === 'settings' && <DashboardSettings userId={userId} />}
     </DashboardShell>
   );
@@ -4539,11 +4609,17 @@ function MobileAppRoot() {
 function BusinessStorefrontScreen({ slug }) {
   const [business, setBusiness] = useState(null); // null = loading, false = not found
   const [error, setError] = useState('');
+  const [view, setView] = useState('list'); // list | detail | cart
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [cart, setCart] = useState([]); // [{ item, quantity }]
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
 
   useEffect(() => {
     getBusinessStorefront(slug)
       .then(setBusiness)
       .catch((e) => { setError(e.message); setBusiness(false); });
+    trackStorefrontEvent(slug, 'store_visit');
   }, [slug]);
 
   if (business === null) {
@@ -4557,11 +4633,113 @@ function BusinessStorefrontScreen({ slug }) {
       </div>
     );
   }
+  if (business.status === 'paused') {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-center px-6">
+        {business.logo_url ? <img src={business.logo_url} alt={business.name} className="w-16 h-16 rounded-2xl object-cover mb-4" /> : <LogoMark size={36} />}
+        <h1 className="text-lg font-bold mb-1">{business.name}</h1>
+        <p className="text-neutral-500 text-sm">This store is temporarily unavailable. Check back soon.</p>
+      </div>
+    );
+  }
 
-  const typeLabel = { product: 'Product', service: 'Service', event: 'Event' };
+  const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
+  const cartTotal = cart.reduce((s, c) => s + Number(c.item.amount) * c.quantity, 0);
+
+  const addToCart = (item, qty) => {
+    setCart(prev => {
+      const existing = prev.find(c => c.item.slug === item.slug);
+      if (existing) {
+        return prev.map(c => c.item.slug === item.slug ? { ...c, quantity: c.quantity + qty } : c);
+      }
+      return [...prev, { item, quantity: qty }];
+    });
+    setView('list');
+  };
+
+  const updateCartQty = (itemSlug, qty) => {
+    if (qty <= 0) {
+      setCart(prev => prev.filter(c => c.item.slug !== itemSlug));
+    } else {
+      setCart(prev => prev.map(c => c.item.slug === itemSlug ? { ...c, quantity: qty } : c));
+    }
+  };
+
+  const handleCheckout = async () => {
+    setCheckoutError('');
+    setCheckoutLoading(true);
+    trackStorefrontEvent(slug, 'checkout_start');
+    try {
+      const result = await createCartCheckout(slug, cart.map(c => ({ slug: c.item.slug, quantity: c.quantity })));
+      window.location.href = result.url;
+    } catch (e) {
+      setCheckoutError(e.message);
+      setCheckoutLoading(false);
+    }
+  };
+
+  if (view === 'detail' && selectedItem) {
+    return (
+      <ProductDetailScreen
+        item={selectedItem}
+        business={business}
+        onBack={() => { setView('list'); setSelectedItem(null); }}
+        onAddToCart={addToCart}
+      />
+    );
+  }
+
+  if (view === 'cart') {
+    return (
+      <div className="min-h-screen bg-black text-white">
+        <div className="max-w-lg mx-auto px-5 py-8">
+          <BackHeader title="Your picks" onBack={() => setView('list')} />
+          {cart.length === 0 ? (
+            <p className="text-sm text-neutral-600 text-center py-10">Nothing picked yet.</p>
+          ) : (
+            <>
+              <div className="space-y-3 mb-6">
+                {cart.map(c => (
+                  <div key={c.item.slug} className="flex items-center gap-3 bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+                    {c.item.image_url ? (
+                      <img src={c.item.image_url} alt={c.item.title} className="w-14 h-14 rounded-lg object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-14 h-14 rounded-lg bg-neutral-900 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{c.item.title}</div>
+                      <div className="text-xs text-neutral-500">{fmtNaira(c.item.amount)} each</div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button onClick={() => updateCartQty(c.item.slug, c.quantity - 1)} className="w-7 h-7 rounded-full bg-neutral-900 text-sm">−</button>
+                      <span className="text-sm w-4 text-center">{c.quantity}</span>
+                      <button onClick={() => updateCartQty(c.item.slug, c.quantity + 1)} className="w-7 h-7 rounded-full bg-neutral-900 text-sm">+</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between mb-4 px-1">
+                <span className="text-sm text-neutral-400">Total</span>
+                <span className="text-lg font-mono font-bold">{fmtNaira(cartTotal)}</span>
+              </div>
+              {checkoutError && <p className="text-sm text-red-400 mb-4">{checkoutError}</p>}
+              <PrimaryButton onClick={handleCheckout} disabled={checkoutLoading}>
+                {checkoutLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Checkout'}
+              </PrimaryButton>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const typeLabel = { product: 'Product', service: 'Service', event: 'Event', custom: 'Talk to Sales' };
 
   return (
     <div className="min-h-screen bg-black text-white">
+      {business.cover_image_url && (
+        <div className="w-full h-40 overflow-hidden"><img src={business.cover_image_url} alt="" className="w-full h-full object-cover" /></div>
+      )}
       <div className="max-w-lg mx-auto px-5 py-10">
         <div className="flex flex-col items-center text-center mb-10">
           {business.logo_url ? (
@@ -4572,40 +4750,122 @@ function BusinessStorefrontScreen({ slug }) {
             </div>
           )}
           <h1 className="text-xl font-bold">{business.name}</h1>
+          {business.category && <p className="text-xs text-violet-400 mt-1">{business.category}</p>}
           {business.description && <p className="text-sm text-neutral-500 mt-2 max-w-sm">{business.description}</p>}
         </div>
 
         {business.products.length === 0 ? (
           <p className="text-sm text-neutral-600 text-center py-10">Nothing listed here yet.</p>
         ) : (
-          <div className="space-y-3">
-            {business.products.map((p) => (
-              <a
-                key={p.slug}
-                href={`https://app.tranxact.co/pay/${p.slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-4 bg-neutral-950 border border-neutral-800 rounded-2xl p-4 hover:border-violet-500 transition"
-              >
-                {p.image_url ? (
-                  <img src={p.image_url} alt={p.title} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                ) : (
-                  <div className="w-14 h-14 rounded-xl bg-neutral-900 flex items-center justify-center flex-shrink-0">
-                    <Link2 className="w-5 h-5 text-neutral-600" />
+          <div className="space-y-3 pb-24">
+            {business.products.map((p) => {
+              const soldOut = p.inventory !== null && p.inventory !== undefined && p.inventory <= 0;
+              return (
+                <button
+                  key={p.slug}
+                  onClick={() => { setSelectedItem(p); setView('detail'); trackStorefrontEvent(slug, 'product_view', p.slug); }}
+                  disabled={soldOut}
+                  className={`w-full flex items-center gap-4 bg-neutral-950 border rounded-2xl p-4 text-left transition ${soldOut ? 'border-neutral-900 opacity-50' : 'border-neutral-800 hover:border-violet-500'}`}
+                >
+                  {p.image_url ? (
+                    <img src={p.image_url} alt={p.title} className="w-20 h-20 rounded-xl object-cover flex-shrink-0" />
+                  ) : (
+                    <div className="w-20 h-20 rounded-xl bg-neutral-900 flex items-center justify-center flex-shrink-0">
+                      <Link2 className="w-6 h-6 text-neutral-600" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-violet-400 font-medium mb-0.5">{typeLabel[p.product_type] || 'Product'}</div>
+                    <div className="text-sm font-semibold truncate">{p.title}</div>
+                    {p.description && <div className="text-xs text-neutral-500 truncate mt-0.5">{p.description}</div>}
+                    <div className="text-sm font-mono mt-1.5">
+                      {soldOut ? <span className="text-red-400">Sold out</span> : p.product_type === 'custom' ? 'Custom pricing' : p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}
+                    </div>
                   </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs text-violet-400 font-medium mb-0.5">{typeLabel[p.product_type] || 'Product'}</div>
-                  <div className="text-sm font-semibold truncate">{p.title}</div>
-                  {p.description && <div className="text-xs text-neutral-500 truncate">{p.description}</div>}
-                </div>
-                <div className="text-sm font-mono flex-shrink-0">{p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}</div>
-              </a>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
 
-        <div className="text-center mt-12 text-xs text-neutral-700">Powered by Tranxact</div>
+        <div className="text-center mt-4 text-xs text-neutral-700">Powered by Tranxact</div>
+      </div>
+
+      {cartCount > 0 && view === 'list' && (
+        <button
+          onClick={() => setView('cart')}
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-white text-black rounded-full px-5 py-3 shadow-lg flex items-center gap-2 text-sm font-semibold z-40"
+        >
+          <span>{cartCount} picked</span>
+          <span className="opacity-50">·</span>
+          <span className="font-mono">{fmtNaira(cartTotal)}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Shown when tapping an item, not straight to checkout. Products/services/
+// events with fixed pricing get a quantity picker and Add to Cart. Flexible
+// pricing can't have a quantity, so it goes straight to its own checkout.
+// Custom (Talk to Sales) items open a chat instead of any checkout at all.
+function ProductDetailScreen({ item, business, onBack, onAddToCart }) {
+  const [quantity, setQuantity] = useState(1);
+  const soldOut = item.inventory !== null && item.inventory !== undefined && item.inventory <= 0;
+  const maxQty = item.inventory !== null && item.inventory !== undefined ? item.inventory : 99;
+  const typeLabel = { product: 'Product', service: 'Service', event: 'Event', custom: 'Talk to Sales' };
+
+  const talkToSalesLink = () => {
+    const msg = encodeURIComponent(`Hi, I'm interested in "${item.title}" from ${business.name}`);
+    if (business.contact_phone) return `https://wa.me/${business.contact_phone.replace(/[^0-9]/g, '')}?text=${msg}`;
+    if (business.contact_email) return `mailto:${business.contact_email}?subject=${encodeURIComponent(item.title)}&body=${msg}`;
+    return `https://wa.me/2347058866702?text=${msg}`;
+  };
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <div className="max-w-lg mx-auto px-5 py-8">
+        <BackHeader title="" onBack={onBack} />
+        {item.image_url ? (
+          <img src={item.image_url} alt={item.title} className="w-full aspect-square rounded-2xl object-cover mb-5" />
+        ) : (
+          <div className="w-full aspect-square rounded-2xl bg-neutral-900 flex items-center justify-center mb-5">
+            <Link2 className="w-10 h-10 text-neutral-700" />
+          </div>
+        )}
+        <div className="text-xs text-violet-400 font-medium mb-1">{typeLabel[item.product_type] || 'Product'}</div>
+        <h1 className="text-2xl font-bold mb-2">{item.title}</h1>
+        {item.description && <p className="text-sm text-neutral-400 mb-4">{item.description}</p>}
+
+        {item.product_type !== 'custom' && (
+          <div className="text-2xl font-mono font-bold mb-6">
+            {soldOut ? <span className="text-red-400 text-lg">Sold out</span> : item.link_type === 'fixed' ? fmtNaira(item.amount) : 'Pay what you want'}
+          </div>
+        )}
+
+        {item.product_type === 'custom' ? (
+          <a href={talkToSalesLink()} target="_blank" rel="noopener noreferrer">
+            <PrimaryButton>Talk to Sales</PrimaryButton>
+          </a>
+        ) : soldOut ? (
+          <PrimaryButton disabled>Sold out</PrimaryButton>
+        ) : item.link_type !== 'fixed' ? (
+          <a href={`https://app.tranxact.co/pay/${item.slug}`}>
+            <PrimaryButton>Continue</PrimaryButton>
+          </a>
+        ) : (
+          <>
+            <div className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 mb-4">
+              <span className="text-sm text-neutral-400">Quantity</span>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-8 h-8 rounded-full bg-neutral-900 text-lg">−</button>
+                <span className="text-sm w-4 text-center">{quantity}</span>
+                <button onClick={() => setQuantity(q => Math.min(maxQty, q + 1))} className="w-8 h-8 rounded-full bg-neutral-900 text-lg">+</button>
+              </div>
+            </div>
+            <PrimaryButton onClick={() => onAddToCart(item, quantity)}>Add to picks</PrimaryButton>
+          </>
+        )}
       </div>
     </div>
   );
@@ -5018,6 +5278,112 @@ function AddEventForm({ business, onBack, onAdded }) {
 // Business identity settings — name, description, logo. If no business
 // exists yet (Storefront was never set up), points there first rather than
 // showing empty fields with nothing real to save.
+// Real orders, created by admin-settle every time a storefront item actually
+// sells, cart or single-item. Nothing here is invented — if this is empty,
+// nothing has genuinely sold yet.
+function DashboardOrders({ userId }) {
+  const [business, setBusiness] = useState(null); // null = loading, false = none yet
+  const [orders, setOrders] = useState([]);
+
+  useEffect(() => {
+    getMyBusiness(userId).then(async ({ data }) => {
+      setBusiness(data || false);
+      if (data) {
+        const { data: ord } = await getMyStorefrontOrders(data.id);
+        setOrders(ord || []);
+      }
+    });
+  }, [userId]);
+
+  if (business === null) {
+    return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
+  }
+  if (business === false) {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-1">Orders</h1>
+        <p className="text-sm text-neutral-500">Set up your Storefront first, then real orders show up here as they come in.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-6">Orders</h1>
+      {orders.length === 0 ? (
+        <p className="text-sm text-neutral-600 py-6 max-w-md">No orders yet. They'll show up here the moment something real sells.</p>
+      ) : (
+        <div className="space-y-2 max-w-md">
+          {orders.map(o => (
+            <div key={o.id} className="bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-mono text-neutral-500">{o.order_number}</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 uppercase">{o.status}</span>
+              </div>
+              <div className="text-sm font-medium">{o.payment_links?.title || 'Item'}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</div>
+              <div className="text-xs text-neutral-500 mt-0.5">
+                {fmtNaira(Number(o.payment_links?.amount || 0) * o.quantity)}
+                {o.customer_name && <span> · {o.customer_name}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Real customers, built up automatically from real orders — nothing entered
+// manually. Kept minimal on purpose: name, contact, what they've spent,
+// how often, nothing more invasive than that.
+function DashboardCustomers({ userId }) {
+  const [business, setBusiness] = useState(null); // null = loading, false = none yet
+  const [customers, setCustomers] = useState([]);
+
+  useEffect(() => {
+    getMyBusiness(userId).then(async ({ data }) => {
+      setBusiness(data || false);
+      if (data) {
+        const { data: cust } = await getMyStorefrontCustomers(data.id);
+        setCustomers(cust || []);
+      }
+    });
+  }, [userId]);
+
+  if (business === null) {
+    return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
+  }
+  if (business === false) {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-1">Customers</h1>
+        <p className="text-sm text-neutral-500">Set up your Storefront first, then real customers show up here as they buy.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-6">Customers</h1>
+      {customers.length === 0 ? (
+        <p className="text-sm text-neutral-600 py-6 max-w-md">No customers yet. They'll show up here after a real order comes in.</p>
+      ) : (
+        <div className="space-y-2 max-w-md">
+          {customers.map(c => (
+            <div key={c.id} className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{c.name || c.contact}</div>
+                <div className="text-xs text-neutral-500">{c.order_count} order{c.order_count === 1 ? '' : 's'}</div>
+              </div>
+              <div className="text-sm font-mono flex-shrink-0">{fmtNaira(c.total_spent)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardSettings({ userId }) {
   const [business, setBusiness] = useState(null); // null = loading, false = none yet
   const [name, setName] = useState('');
@@ -5265,6 +5631,7 @@ function DashboardStorefront({ userId, setTab }) {
   const [view, setView] = useState('dashboard'); // dashboard | addProduct | editProduct
   const [editingItem, setEditingItem] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const [menuOpenFor, setMenuOpenFor] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
   const [actionError, setActionError] = useState('');
@@ -5361,8 +5728,17 @@ function DashboardStorefront({ userId, setTab }) {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-1">Storefront</h1>
-      <p className="text-sm text-neutral-500 mb-6">{business.name}. Sell products, services, or events with a shareable page.</p>
+      <div className="flex items-center gap-2 mb-1">
+        <h1 className="text-2xl font-bold">Storefront</h1>
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${business.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-400'}`}>
+          {business.status === 'active' ? 'Active' : 'Paused'}
+        </span>
+      </div>
+      <p className="text-sm text-neutral-500 mb-4">{business.name}. Sell products, services, or events with a shareable page.</p>
+      <a href={storefrontUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs text-violet-400 mb-6">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        Preview your page
+      </a>
 
       <StoreSetupChecklist
         business={business}
@@ -5372,7 +5748,7 @@ function DashboardStorefront({ userId, setTab }) {
         onGoAdd={() => setView('addProduct')}
       />
 
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6 max-w-md">
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-4 max-w-md">
         <div className="text-xs text-neutral-500 mb-2">Your page</div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm text-violet-400 font-mono truncate">{storefrontUrl.replace('https://', '')}</span>
@@ -5384,6 +5760,44 @@ function DashboardStorefront({ userId, setTab }) {
           </button>
         </div>
       </div>
+
+      <div className="grid grid-cols-4 gap-2 mb-6 max-w-md">
+        <button
+          onClick={() => { if (navigator.share) navigator.share({ title: business.name, url: storefrontUrl }); else { navigator.clipboard?.writeText(storefrontUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); } }}
+          className="flex flex-col items-center gap-1.5 bg-neutral-950 border border-neutral-800 rounded-xl py-3"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+          <span className="text-[10px] text-neutral-400">Share</span>
+        </button>
+        <button onClick={() => setQrOpen(true)} className="flex flex-col items-center gap-1.5 bg-neutral-950 border border-neutral-800 rounded-xl py-3">
+          <QrCode className="w-4 h-4" />
+          <span className="text-[10px] text-neutral-400">QR code</span>
+        </button>
+        <button onClick={() => setTab('settings')} className="flex flex-col items-center gap-1.5 bg-neutral-950 border border-neutral-800 rounded-xl py-3">
+          <Settings className="w-4 h-4" />
+          <span className="text-[10px] text-neutral-400">Settings</span>
+        </button>
+        <button onClick={() => setTab('analytics')} className="flex flex-col items-center gap-1.5 bg-neutral-950 border border-neutral-800 rounded-xl py-3">
+          <BarChart3 className="w-4 h-4" />
+          <span className="text-[10px] text-neutral-400">Analytics</span>
+        </button>
+      </div>
+
+      {qrOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-5" onClick={() => setQrOpen(false)}>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 max-w-xs w-full text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white rounded-xl p-3 inline-block mb-4"><BrandedQR data={storefrontUrl} size={200} /></div>
+            <p className="text-xs text-neutral-500 mb-4 truncate">{storefrontUrl.replace('https://', '')}</p>
+            <a
+              href={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(storefrontUrl)}`}
+              download="storefront-qr.png"
+              className="text-xs bg-neutral-800 rounded-lg px-4 py-2 inline-block"
+            >
+              Download QR
+            </a>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-3 max-w-md">
         <h2 className="text-sm font-semibold">Your products</h2>
