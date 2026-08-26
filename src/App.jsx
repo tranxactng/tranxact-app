@@ -2429,9 +2429,27 @@ function AdminScreen() {
                 }}
                 className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-left hover:border-violet-500/40 transition"
               >
-                <div>
-                  <div className="text-sm font-medium">{n.link_title || n.link_slug}</div>
-                  <div className="text-xs text-neutral-500">@{n.creator_username} · {n.method}{n.crypto_asset ? ` (${n.crypto_asset})` : ''} · claims {n.claimed_amount ? fmtNaira(n.claimed_amount) : '—'}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="text-sm font-medium">{n.link_title || n.link_slug}</div>
+                    {n.is_storefront && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 uppercase flex-shrink-0">
+                        {n.cart_items?.length > 0 ? 'Cart' : n.product_type || 'Storefront'}
+                      </span>
+                    )}
+                    {n.sold_out && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 uppercase flex-shrink-0">Sold out</span>
+                    )}
+                    {!n.sold_out && n.inventory !== null && n.inventory <= 5 && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 uppercase flex-shrink-0">{n.inventory} left</span>
+                    )}
+                  </div>
+                  {n.cart_items?.length > 0 && (
+                    <div className="text-[11px] text-neutral-500 mt-0.5">
+                      {n.cart_items.map((ci, i) => `${ci.title}${ci.quantity > 1 ? ` ×${ci.quantity}` : ''}`).join(', ')}
+                    </div>
+                  )}
+                  <div className="text-xs text-neutral-500 mt-0.5">@{n.creator_username} · {n.method}{n.crypto_asset ? ` (${n.crypto_asset})` : ''} · claims {n.claimed_amount ? fmtNaira(n.claimed_amount) : '—'}</div>
                 </div>
                 <ChevronRight className="w-4 h-4 text-neutral-600 flex-shrink-0" />
               </button>
@@ -2478,6 +2496,12 @@ function AdminScreen() {
                 </p>
               )}
               {tpSuccess.link_closed && <p className="text-xs text-neutral-500">Link closed. One-time payment settled</p>}
+              {tpSuccess.order_numbers?.length > 0 && (
+                <p className="text-xs text-neutral-500 mt-1">
+                  Order{tpSuccess.order_numbers.length > 1 ? 's' : ''} created: {tpSuccess.order_numbers.join(', ')}
+                  {tpSuccess.inventory_decremented && ' · Stock updated'}
+                </p>
+              )}
             </div>
           )}
           <PrimaryButton onClick={handleTpSettle} disabled={tpLoading}>
