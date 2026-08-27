@@ -4693,10 +4693,26 @@ function BusinessStorefrontScreen({ slug }) {
     return <div className="min-h-screen bg-black flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
   }
   if (business === false) {
+    if (!slug) {
+      return (
+        <div className="min-h-screen bg-black flex flex-col items-center justify-center text-center px-6">
+          <LogoMark size={40} />
+          <h1 className="text-xl font-bold mt-6 mb-2">Every Tranxact business gets a page like this</h1>
+          <p className="text-sm text-neutral-500 max-w-sm mb-8">
+            List products, services, or events on your own shareable link. Customers pay in naira or crypto, you settle through the same Tranxact balance you already use.
+          </p>
+          <a href="https://pay.tranxact.co">
+            <PrimaryButton>Set up your storefront</PrimaryButton>
+          </a>
+          <p className="text-xs text-neutral-600 mt-8">Looking for a specific store? Check the link you were given.</p>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center text-center px-6">
         <LogoMark size={36} />
-        <p className="text-neutral-500 text-sm mt-6">{error || "This business page doesn't exist."}</p>
+        <p className="text-neutral-500 text-sm mt-6">{error || "This store link doesn't work."}</p>
+        <p className="text-xs text-neutral-600 mt-2">Double-check the link, or ask whoever shared it for the right one.</p>
       </div>
     );
   }
