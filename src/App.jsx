@@ -3195,7 +3195,7 @@ function CheckoutPage({ slug }) {
   // effective_rate is ₦ per $1, so this division gives the USD value — NOT a
   // crypto quantity. The actual coin amount needs a further division by that
   // coin's own USD market price.
-  const usdAmount = flexIsUsd
+  const usdAmount = link?.link_type === 'flexible' && flexIsUsd
     ? (parseFloat(flexAmount) || 0)
     : (rateRow && amountNgn > 0 ? amountNgn / Number(rateRow.effective_rate) : 0);
   const cryptoAmount = rateRow && rateRow.usd_market_price > 0 ? usdAmount / Number(rateRow.usd_market_price) : 0;
@@ -3275,9 +3275,14 @@ function CheckoutPage({ slug }) {
             </div>
           </div>
 
-          <p className="text-xs text-neutral-500 mb-1.5">{link.is_tip ? 'Tip amount' : 'Amount due'}{link.link_type === 'flexible' ? (flexIsUsd ? ' (USD)' : ' (NGN)') : ''}</p>
+          <p className="text-xs text-neutral-500 mb-1.5">
+            {link.is_tip ? 'Tip amount' : 'Amount due'}
+            {link.link_type === 'flexible' ? (flexIsUsd ? ' (USD)' : ' (NGN)') : (payTab === 'crypto' ? ' (USD)' : '')}
+          </p>
           {link.link_type === 'fixed' ? (
-            <div className="font-mono text-3xl font-bold mb-5">{fmtNaira(link.amount)}</div>
+            <div className="font-mono text-3xl font-bold mb-5">
+              {payTab === 'crypto' && rateRow ? `$${usdAmount.toFixed(2)}` : fmtNaira(link.amount)}
+            </div>
           ) : (
             <div className="mb-5">
               <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
@@ -3398,8 +3403,8 @@ function CheckoutPage({ slug }) {
 
                   {usdAmount > 0 && rateRow && (
                     <div className="text-center mb-4">
-                      <div className="font-mono text-2xl font-bold">${usdAmount.toFixed(2)}</div>
-                      <div className="text-xs text-neutral-500">Send {cryptoAmount.toFixed(6)} {cryptoAsset} · {fmtNaira(flexIsUsd ? usdAmount * Number(rateRow.effective_rate) : amountNgn)} · converted at today's rate</div>
+                      <div className="text-sm text-neutral-400">Send</div>
+                      <div className="font-mono text-2xl font-bold">{cryptoAmount.toFixed(6)} {cryptoAsset}</div>
                     </div>
                   )}
 
@@ -4799,6 +4804,25 @@ function BusinessStorefrontScreen({ slug }) {
 
   return (
     <div className="min-h-screen bg-black text-white">
+      <div className="sticky top-0 z-30 bg-black/90 backdrop-blur-md border-b border-neutral-900">
+        <div className="max-w-lg mx-auto px-5 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            {business.logo_url ? (
+              <img src={business.logo_url} alt="" className="w-7 h-7 rounded-lg object-cover flex-shrink-0" />
+            ) : (
+              <LogoMark size={18} />
+            )}
+            <span className="text-sm font-semibold truncate">{business.name}</span>
+          </div>
+          <button onClick={() => setView('cart')} className="relative p-1.5 flex-shrink-0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+            {cartCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 bg-violet-500 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{cartCount}</span>
+            )}
+          </button>
+        </div>
+      </div>
+
       {business.cover_image_url && (
         <div className="w-full h-40 overflow-hidden"><img src={business.cover_image_url} alt="" className="w-full h-full object-cover" /></div>
       )}
@@ -4819,15 +4843,15 @@ function BusinessStorefrontScreen({ slug }) {
         {business.products.length === 0 ? (
           <p className="text-sm text-neutral-600 text-center py-10">Nothing listed here yet.</p>
         ) : (
-          <div className="space-y-3 pb-24">
+          <div className="space-y-3 pb-10">
             {business.products.map((p) => {
               const soldOut = p.inventory !== null && p.inventory !== undefined && p.inventory <= 0;
+              const canQuickAdd = !soldOut && p.product_type !== 'custom' && p.link_type === 'fixed';
               return (
-                <button
+                <div
                   key={p.slug}
                   onClick={() => { setSelectedItem(p); setView('detail'); trackStorefrontEvent(slug, 'product_view', p.slug); }}
-                  disabled={soldOut}
-                  className={`w-full flex items-center gap-4 bg-neutral-950 border rounded-2xl p-4 text-left transition ${soldOut ? 'border-neutral-900 opacity-50' : 'border-neutral-800 hover:border-violet-500'}`}
+                  className={`w-full flex items-center gap-4 bg-neutral-950 border rounded-2xl p-4 text-left transition cursor-pointer ${soldOut ? 'border-neutral-900 opacity-50' : 'border-neutral-800 hover:border-violet-500'}`}
                 >
                   {p.image_url ? (
                     <img src={p.image_url} alt={p.title} className="w-20 h-20 rounded-xl object-cover flex-shrink-0" />
@@ -4840,29 +4864,33 @@ function BusinessStorefrontScreen({ slug }) {
                     <div className="text-xs text-violet-400 font-medium mb-0.5">{typeLabel[p.product_type] || 'Product'}</div>
                     <div className="text-sm font-semibold truncate">{p.title}</div>
                     {p.description && <div className="text-xs text-neutral-500 truncate mt-0.5">{p.description}</div>}
-                    <div className="text-sm font-mono mt-1.5">
+                    <div className="text-sm font-mono mt-1.5 mb-2.5">
                       {soldOut ? <span className="text-red-400">Sold out</span> : p.product_type === 'custom' ? 'Custom pricing' : p.link_type === 'fixed' ? fmtNaira(p.amount) : 'Flexible'}
                     </div>
+                    {canQuickAdd ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); addToCart(p, 1); }}
+                        className="bg-white text-black text-xs font-semibold rounded-lg px-3.5 py-1.5"
+                      >
+                        Buy now
+                      </button>
+                    ) : p.product_type === 'custom' ? (
+                      <span className="text-xs text-violet-400 font-medium">Talk to Sales →</span>
+                    ) : null}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
         )}
 
-        <div className="text-center mt-4 text-xs text-neutral-700">Powered by Tranxact</div>
+        <div className="text-center mt-6 pt-4 border-t border-neutral-900">
+          <a href="https://tranxact.co" target="_blank" rel="noopener noreferrer" className="text-xs text-neutral-600 hover:text-neutral-400 transition">Powered by Tranxact</a>
+          <div className="mt-1.5">
+            <a href="https://tranxact.co/#storefront" target="_blank" rel="noopener noreferrer" className="text-xs text-violet-400 hover:text-violet-300 transition">Bring your business to Tranxact →</a>
+          </div>
+        </div>
       </div>
-
-      {cartCount > 0 && view === 'list' && (
-        <button
-          onClick={() => setView('cart')}
-          className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-white text-black rounded-full px-5 py-3 shadow-lg flex items-center gap-2 text-sm font-semibold z-40"
-        >
-          <span>{cartCount} picked</span>
-          <span className="opacity-50">·</span>
-          <span className="font-mono">{fmtNaira(cartTotal)}</span>
-        </button>
-      )}
     </div>
   );
 }
