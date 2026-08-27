@@ -3,7 +3,7 @@ import {
   Eye, EyeOff, Bell, ArrowDownToLine, ArrowUpFromLine, Link2, Smartphone, Wifi, Zap, Tv,
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
-  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag
+  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -4673,6 +4673,372 @@ function MobileAppRoot() {
 // Every "buy" button links straight to the existing, already-proven checkout
 // at app.tranxact.co/pay/{slug} — zero new payment code, same crypto/naira/
 // admin-settlement flow that already works today.
+// The public marketing site for business.tranxact.co (no slug) — explains
+// Tranxact Business and drives signup. Genuinely distinct from the real
+// customer storefronts at business.tranxact.co/{slug} below, and distinct
+// from the merchant dashboard at pay.tranxact.co. Built incrementally,
+// section by section, matching the same discipline as the rest of this
+// build rather than rushed in one pass.
+function BusinessMarketingScreen() {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const capabilities = [
+    { Icon: ShoppingBag, title: 'Store', desc: 'Create your own professional business page and showcase what you sell.' },
+    { Icon: Wallet, title: 'Payments', desc: 'Accept payments through Tranxact checkout using supported naira and crypto payment methods.' },
+    { Icon: Link2, title: 'Payment Links', desc: 'Create a payment link in seconds and share it anywhere.' },
+    { Icon: FileText, title: 'Orders', desc: 'Track purchases and order activity from one dashboard.' },
+    { Icon: UserCircle, title: 'Customers', desc: 'Keep track of customers and their purchase activity.' },
+    { Icon: Calendar, title: 'Events', desc: 'Create events, sell tickets and manage check-ins.' },
+  ];
+
+  const steps = [
+    { n: '01', title: 'Create your page', desc: 'Tell us about your business and get your unique Tranxact page.' },
+    { n: '02', title: 'Add what you sell', desc: 'Add products, services, or events.' },
+    { n: '03', title: 'Share your link', desc: 'Share it on WhatsApp, Instagram, TikTok, X, or anywhere else.' },
+    { n: '04', title: 'Get paid', desc: 'Customers checkout through Tranxact using supported payment methods.' },
+  ];
+
+  const navLinks = [
+    { href: '#product', label: 'Product' },
+    { href: '#how-it-works', label: 'How it works' },
+    { href: '#payments', label: 'Payments' },
+    { href: '#storefront', label: 'Storefront' },
+    { href: '#events', label: 'Events' },
+  ];
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <div className="sticky top-0 z-40 bg-black/90 backdrop-blur-md border-b border-neutral-900">
+        <div className="max-w-5xl mx-auto px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <LogoMark size={22} />
+            <span className="font-bold text-sm">Tranxact Business</span>
+          </div>
+          <nav className="hidden md:flex items-center gap-7 text-sm text-neutral-400">
+            {navLinks.map(l => <a key={l.href} href={l.href} className="hover:text-white transition">{l.label}</a>)}
+          </nav>
+          <div className="hidden md:flex items-center gap-4">
+            <a href="https://pay.tranxact.co" className="text-sm text-neutral-400 hover:text-white transition">Log in</a>
+            <a href="https://pay.tranxact.co" className="bg-white text-black text-sm font-semibold rounded-full px-4 py-2">Get started</a>
+          </div>
+          <button onClick={() => setMenuOpen(true)} className="md:hidden p-1.5" aria-label="Open menu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-5 h-5"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </div>
+
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setMenuOpen(false); }}>
+          <div className="absolute top-0 right-0 bottom-0 w-72 max-w-[85vw] bg-neutral-950 border-l border-neutral-900 p-5 flex flex-col" style={{ paddingTop: 'calc(1.25rem + env(safe-area-inset-top))' }}>
+            <button onClick={() => setMenuOpen(false)} className="self-end p-1.5 mb-4" aria-label="Close menu"><X className="w-5 h-5 text-neutral-400" /></button>
+            <nav className="flex flex-col gap-1">
+              {navLinks.map(l => (
+                <a key={l.href} href={l.href} onClick={() => setMenuOpen(false)} className="text-sm py-3 border-b border-neutral-900 text-neutral-300">{l.label}</a>
+              ))}
+            </nav>
+            <div className="mt-6 space-y-2">
+              <a href="https://pay.tranxact.co" className="block text-center text-sm py-2.5 rounded-full bg-neutral-900 border border-neutral-800">Log in</a>
+              <a href="https://pay.tranxact.co" className="block text-center text-sm font-semibold py-2.5 rounded-full bg-white text-black">Get started</a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-5xl mx-auto px-5 pt-16 pb-20 text-center">
+        <h1 className="text-3xl md:text-5xl font-bold tracking-tight mb-4">Build your business on Tranxact.</h1>
+        <p className="text-neutral-400 max-w-lg mx-auto mb-8">Sell your products, services and events, accept payments, and manage your business from one place.</p>
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          <a href="https://pay.tranxact.co" className="bg-white text-black text-sm font-semibold rounded-full px-6 py-3">Get started</a>
+          <a href="#how-it-works" className="text-sm text-neutral-400 hover:text-white transition px-4 py-3">See how it works</a>
+        </div>
+
+        <div className="mt-16 grid md:grid-cols-3 gap-4 text-left">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
+            <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-3">Merchant dashboard</div>
+            <div className="text-xs text-violet-400 font-medium mb-1">Vscents</div>
+            <div className="text-sm font-semibold mb-4 break-all">business.tranxact.co/vscents</div>
+            <div className="flex items-center justify-between text-xs bg-neutral-900 rounded-lg px-3 py-2.5">
+              <span className="text-neutral-400">Maahir Legacy LATAFA</span>
+              <span className="font-mono">₦55,000</span>
+            </div>
+          </div>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
+            <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-3">Customer storefront</div>
+            <div className="text-sm font-bold mb-1">Vscents</div>
+            <div className="text-xs text-neutral-500 mb-4">Perfumes &amp; fragrances</div>
+            <div className="bg-neutral-900 rounded-lg p-3">
+              <div className="text-xs font-medium mb-1">Maahir Legacy LATAFA</div>
+              <div className="text-sm font-mono mb-2">₦55,000</div>
+              <div className="bg-white text-black text-xs font-semibold rounded-lg py-1.5 text-center">Buy now</div>
+            </div>
+          </div>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
+            <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-3">Checkout</div>
+            <div className="text-xs text-neutral-500 mb-1">Paying Vscents</div>
+            <div className="text-lg font-mono font-bold mb-4">₦55,000</div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className="bg-white text-black text-xs font-semibold rounded-lg py-2 text-center">Naira</div>
+              <div className="bg-neutral-900 text-xs font-semibold rounded-lg py-2 text-center border border-neutral-800">Crypto</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="product" className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900">
+        <h2 className="text-2xl md:text-3xl font-bold text-center mb-3">Everything you need to sell and get paid.</h2>
+        <p className="text-neutral-500 text-center max-w-md mx-auto mb-12">One product, not a pile of disconnected tools.</p>
+        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
+          {capabilities.map((f, i) => (
+            <div key={i} className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
+              <div className="w-9 h-9 rounded-lg bg-violet-500/15 flex items-center justify-center mb-3">
+                <f.Icon className="w-4 h-4 text-violet-400" />
+              </div>
+              <div className="text-sm font-semibold mb-1">{f.title}</div>
+              <div className="text-xs text-neutral-500 leading-relaxed">{f.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div id="storefront" className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 grid md:grid-cols-2 gap-10 items-center">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-bold mb-3">Your business deserves its own place online.</h2>
+          <p className="text-neutral-400 mb-6">Create a shareable page for your business and give your customers one simple place to discover what you sell.</p>
+          <a href="https://pay.tranxact.co" className="bg-white text-black text-sm font-semibold rounded-full px-6 py-3 inline-block">Get started</a>
+        </div>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+          <div className="flex items-center gap-2.5 mb-4 pb-4 border-b border-neutral-900">
+            <div className="w-9 h-9 rounded-xl bg-neutral-900 flex items-center justify-center"><LogoMark size={18} /></div>
+            <div>
+              <div className="text-sm font-bold">Vscents</div>
+              <div className="text-xs text-neutral-500">Perfumes &amp; fragrances</div>
+            </div>
+          </div>
+          <div className="space-y-2.5">
+            {[{ title: 'Maahir Legacy LATAFA', price: '₦55,000' }, { title: 'Amour Eternal', price: '₦45,000' }].map((p, i) => (
+              <div key={i} className="flex items-center justify-between bg-neutral-900 rounded-xl px-3.5 py-2.5">
+                <div>
+                  <div className="text-xs text-violet-400 font-medium">Product</div>
+                  <div className="text-sm font-medium">{p.title}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-mono mb-1">{p.price}</div>
+                  <div className="bg-white text-black text-[10px] font-semibold rounded-full px-2.5 py-1">Buy now</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="text-center text-[10px] text-neutral-700 mt-4">Powered by Tranxact</div>
+        </div>
+      </div>
+
+      <div id="how-it-works" className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900">
+        <h2 className="text-2xl md:text-3xl font-bold text-center mb-12">From business to selling in minutes.</h2>
+        <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6">
+          {steps.map((s, i) => (
+            <div key={i}>
+              <div className="text-xs font-mono text-violet-400 mb-2">{s.n}</div>
+              <div className="text-sm font-semibold mb-1.5">{s.title}</div>
+              <div className="text-xs text-neutral-500 leading-relaxed">{s.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div id="payments" className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 grid md:grid-cols-2 gap-10 items-center">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-bold mb-2">Need to get paid for something else?</h2>
+          <p className="text-neutral-400 mb-6">Create a payment link in seconds. No developer required.</p>
+          <div className="space-y-5">
+            {[
+              { n: '1', title: 'Create the link', desc: "Give it a name, set a fixed amount or let the customer enter their own, and you're done." },
+              { n: '2', title: 'Share it anywhere', desc: 'Send it to a WhatsApp chat, drop it in your Instagram bio, or paste it into an email.' },
+              { n: '3', title: 'Get paid', desc: 'Your customer pays by bank transfer or supported crypto. The money lands in your balance instantly.' },
+            ].map(s => (
+              <div key={s.n} className="flex gap-3">
+                <div className="w-6 h-6 rounded-full bg-violet-500/15 text-violet-400 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{s.n}</div>
+                <div>
+                  <div className="text-sm font-semibold mb-0.5">{s.title}</div>
+                  <div className="text-xs text-neutral-500 leading-relaxed">{s.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+          <div className="text-xs text-neutral-500 mb-2">Payment for</div>
+          <div className="text-sm font-semibold mb-4">Logo Design</div>
+          <div className="text-2xl font-mono font-bold mb-5">₦50,000</div>
+          <div className="bg-white text-black text-sm font-semibold rounded-full py-2.5 text-center">Pay</div>
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 text-center">
+        <h2 className="text-2xl md:text-3xl font-bold mb-3">One checkout. Multiple ways to pay.</h2>
+        <p className="text-neutral-500 max-w-md mx-auto mb-12">Customers pay using supported naira payment methods or supported crypto, all through the same Tranxact checkout.</p>
+        <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-neutral-400">
+          {['Business page', 'Product / Service / Event', 'Checkout', 'Choose payment method', 'Payment', 'Confirmation', 'Business receives funds'].map((s, i, arr) => (
+            <React.Fragment key={s}>
+              <span className="bg-neutral-950 border border-neutral-800 rounded-full px-3.5 py-2">{s}</span>
+              {i < arr.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-neutral-700" />}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900">
+        <h2 className="text-2xl md:text-3xl font-bold text-center mb-12">Run your business from one dashboard.</h2>
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6">
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Available balance</div>
+                <div className="text-lg font-mono font-bold">₦482,600</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Orders</div>
+                <div className="text-lg font-mono font-bold">18</div>
+              </div>
+            </div>
+            <div className="text-[10px] text-neutral-600 text-center border-t border-neutral-900 pt-3">Demonstration data</div>
+          </div>
+          <div className="flex flex-wrap content-start gap-2">
+            {['Storefront', 'Products', 'Services', 'Events', 'Orders', 'Customers', 'Payments', 'Payment Links', 'Analytics', 'Transactions', 'Withdraw'].map(item => (
+              <span key={item} className="text-xs bg-neutral-950 border border-neutral-800 rounded-full px-3 py-1.5 text-neutral-400">{item}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900">
+        <h2 className="text-2xl md:text-3xl font-bold text-center mb-12">Whatever you sell, build it on Tranxact.</h2>
+        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
+          {[
+            { title: 'Retailers', desc: 'Sell products online.' },
+            { title: 'Freelancers', desc: 'Get paid for your work.' },
+            { title: 'Creators', desc: 'Accept tips and payments.' },
+            { title: 'Service providers', desc: 'Showcase and sell your services.' },
+            { title: 'Event organizers', desc: 'Sell tickets and manage events.' },
+            { title: 'Small businesses', desc: 'Manage your business and payments in one place.' },
+          ].map((b, i) => (
+            <div key={i} className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
+              <div className="text-sm font-semibold mb-1">{b.title}</div>
+              <div className="text-xs text-neutral-500">{b.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 text-center">
+        <h2 className="text-2xl md:text-3xl font-bold mb-2">One link. Everywhere.</h2>
+        <p className="text-neutral-500 max-w-md mx-auto mb-10">Share your page on WhatsApp, Instagram, TikTok, X, your website, or a QR code. Create once, share anywhere.</p>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 max-w-sm mx-auto flex items-center justify-between gap-3">
+          <span className="text-sm text-violet-400 font-mono truncate">business.tranxact.co/yourbusiness</span>
+        </div>
+        <div className="flex items-center justify-center gap-2 mt-4">
+          <span className="flex items-center gap-1.5 text-xs bg-neutral-950 border border-neutral-800 rounded-full px-3.5 py-2 text-neutral-400"><Copy className="w-3 h-3" /> Copy</span>
+          <span className="flex items-center gap-1.5 text-xs bg-neutral-950 border border-neutral-800 rounded-full px-3.5 py-2 text-neutral-400"><Share2 className="w-3 h-3" /> Share</span>
+          <span className="flex items-center gap-1.5 text-xs bg-neutral-950 border border-neutral-800 rounded-full px-3.5 py-2 text-neutral-400"><QrCode className="w-3 h-3" /> QR</span>
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 text-center">
+        <h2 className="text-2xl md:text-3xl font-bold mb-10">Your customers get a simpler way to buy.</h2>
+        <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-neutral-400">
+          {['Discover your business', 'Choose a product / service / event', 'Checkout', 'Pay', 'Confirmation'].map((s, i, arr) => (
+            <React.Fragment key={s}>
+              <span className="bg-neutral-950 border border-neutral-800 rounded-full px-3.5 py-2">{s}</span>
+              {i < arr.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-neutral-700" />}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+
+      <div id="events" className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 grid md:grid-cols-2 gap-10 items-center">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-bold mb-3">Sell more than products.</h2>
+          <p className="text-neutral-400">Create events, set ticket types and inventory, sell tickets, generate digital tickets, and scan them at entry, all tracked from the same dashboard.</p>
+        </div>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-2.5">
+          {[{ tier: 'Regular', price: '₦10,000' }, { tier: 'VIP', price: '₦30,000' }, { tier: 'VVIP', price: '₦75,000' }].map(t => (
+            <div key={t.tier} className="flex items-center justify-between bg-neutral-900 rounded-xl px-4 py-3">
+              <span className="text-sm font-medium">{t.tier}</span>
+              <span className="text-sm font-mono">{t.price}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 text-center">
+        <h2 className="text-2xl md:text-3xl font-bold mb-3">Let customers pay their way.</h2>
+        <p className="text-neutral-500 max-w-md mx-auto">Businesses can accept supported naira and supported crypto payment methods through Tranxact, all settling into the same balance.</p>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 text-center">
+        <h2 className="text-2xl md:text-3xl font-bold mb-10">Built to grow with your business.</h2>
+        <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-neutral-400 mb-3">
+          {['Create a page', 'Add one product', 'Share the link', 'Get paid'].map((s, i, arr) => (
+            <React.Fragment key={s}>
+              <span className="bg-neutral-950 border border-neutral-800 rounded-full px-3.5 py-2">{s}</span>
+              {i < arr.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-neutral-700" />}
+            </React.Fragment>
+          ))}
+        </div>
+        <p className="text-xs text-neutral-600">Then grow into products, services, orders, customers, events, analytics, and more, whenever you're ready.</p>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-5 py-20 border-t border-neutral-900 text-center">
+        <h2 className="text-3xl md:text-4xl font-bold mb-3">Ready to build your business on Tranxact?</h2>
+        <p className="text-neutral-400 mb-8">Create your page, share what you sell, and start getting paid.</p>
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          <a href="https://pay.tranxact.co" className="bg-white text-black text-sm font-semibold rounded-full px-6 py-3">Get started</a>
+          <a href="#how-it-works" className="text-sm text-neutral-400 hover:text-white transition px-4 py-3">See how it works</a>
+        </div>
+      </div>
+
+      <footer className="border-t border-neutral-900">
+        <div className="max-w-5xl mx-auto px-5 py-14">
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-8 mb-10">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <LogoMark size={18} />
+                <span className="font-bold text-sm">Tranxact Business</span>
+              </div>
+              <p className="text-xs text-neutral-600">Build your business on Tranxact.</p>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-neutral-500 mb-3">Product</div>
+              <div className="flex flex-col gap-2 text-xs text-neutral-500">
+                <a href="#storefront" className="hover:text-white transition">Storefront</a>
+                <a href="#payments" className="hover:text-white transition">Payments</a>
+                <a href="#payments" className="hover:text-white transition">Payment Links</a>
+                <a href="#events" className="hover:text-white transition">Events</a>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-neutral-500 mb-3">Business</div>
+              <div className="flex flex-col gap-2 text-xs text-neutral-500">
+                <a href="https://pay.tranxact.co" className="hover:text-white transition">Get started</a>
+                <a href="https://pay.tranxact.co" className="hover:text-white transition">Log in</a>
+                <a href="mailto:hello@tranxact.co" className="hover:text-white transition">Help</a>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-neutral-500 mb-3">Tranxact</div>
+              <div className="flex flex-col gap-2 text-xs text-neutral-500">
+                <a href="https://tranxact.co" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Main Tranxact</a>
+                <a href="https://tranxact.co/terms.html" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Terms</a>
+                <a href="https://tranxact.co/privacy.html" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Privacy</a>
+              </div>
+            </div>
+          </div>
+          <div className="text-xs text-neutral-700 border-t border-neutral-900 pt-6">© 2026 Tranxact Technologies Ltd.</div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
 function BusinessStorefrontScreen({ slug }) {
   const [business, setBusiness] = useState(null); // null = loading, false = not found
   const [error, setError] = useState('');
@@ -4694,19 +5060,7 @@ function BusinessStorefrontScreen({ slug }) {
   }
   if (business === false) {
     if (!slug) {
-      return (
-        <div className="min-h-screen bg-black flex flex-col items-center justify-center text-center px-6">
-          <LogoMark size={40} />
-          <h1 className="text-xl font-bold mt-6 mb-2">Every Tranxact business gets a page like this</h1>
-          <p className="text-sm text-neutral-500 max-w-sm mb-8">
-            List products, services, or events on your own shareable link. Customers pay in naira or crypto, you settle through the same Tranxact balance you already use.
-          </p>
-          <a href="https://pay.tranxact.co">
-            <PrimaryButton>Set up your storefront</PrimaryButton>
-          </a>
-          <p className="text-xs text-neutral-600 mt-8">Looking for a specific store? Check the link you were given.</p>
-        </div>
-      );
+      return <BusinessMarketingScreen />;
     }
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center text-center px-6">
@@ -6068,6 +6422,14 @@ function EditItemScreen({ item, onBack, onSaved }) {
 export default function TranxactApp() {
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+
+  // window.Capacitor only exists inside a Capacitor-wrapped native app —
+  // never in a normal browser, so this never fires for app./pay./business.
+  // tranxact.co today. A native shell has no meaningful hostname to detect
+  // from, so it always gets the consumer app specifically, never the web-
+  // only dashboard or storefront experiences.
+  const isNativeApp = typeof window !== 'undefined' && Boolean(window.Capacitor?.isNativePlatform?.());
+  if (isNativeApp) return <MobileAppRoot />;
 
   if (hostname.startsWith('pay.')) return <WebDashboardApp />;
 
