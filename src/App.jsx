@@ -1903,6 +1903,7 @@ function CardsScreen({ fullName = '' }) {
 // ---------- Profile ----------
 // ---------- Admin ----------
 function AdminScreen() {
+  const [adminTab, setAdminTab] = useState('overview');
   const [searchUsername, setSearchUsername] = useState('');
   const [lookupResult, setLookupResult] = useState(null);
   const [lookupError, setLookupError] = useState('');
@@ -2232,6 +2233,27 @@ function AdminScreen() {
     <div className="space-y-6">
       <h1 className="text-xl font-bold">Admin</h1>
 
+      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+        {[
+          { key: 'overview', label: 'Overview' },
+          { key: 'payment', label: 'Payment Settling' },
+          { key: 'crypto', label: 'Crypto Settling' },
+          { key: 'sweeping', label: 'Sweeping' },
+          { key: 'transactions', label: 'Transactions' },
+          { key: 'other', label: 'Other' },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setAdminTab(t.key)}
+            className={`flex-shrink-0 px-3.5 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition ${adminTab === t.key ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 border border-neutral-800'}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {adminTab === 'overview' && (
+      <>
       {stats && (
         <div>
           <h2 className="text-xs text-neutral-500 mb-2">Overview</h2>
@@ -2308,7 +2330,10 @@ function AdminScreen() {
           </div>
         )}
       </div>
+      </>
+      )}
 
+      {adminTab === 'crypto' && (
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
         <div className="text-xs text-neutral-500 mb-3">Settle Wallet Funding</div>
         <TabToggle
@@ -2398,7 +2423,9 @@ function AdminScreen() {
           {settleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Settle'}
         </PrimaryButton>
       </div>
+      )}
 
+      {adminTab === 'payment' && (
       <div className="bg-neutral-950 border border-violet-500/30 rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <Link2 className="w-4 h-4 text-violet-400" />
@@ -2509,7 +2536,10 @@ function AdminScreen() {
           </PrimaryButton>
         </div>
       </div>
+      )}
 
+      {adminTab === 'other' && (
+      <>
       <div>
         <h2 className="text-sm font-semibold mb-3">Pending Withdrawals</h2>
         {pendingWithdrawals === null ? (
@@ -2637,7 +2667,11 @@ function AdminScreen() {
           </>
         )}
       </div>
+      </>
+      )}
 
+      {adminTab === 'sweeping' && (
+      <>
       <div>
         <h2 className="text-sm font-semibold mb-1 text-amber-400">Reveal Deposit Private Key</h2>
         <p className="text-xs text-neutral-500 mb-3">Extremely sensitive: this returns a real key controlling real funds. The backend re-derives and verifies the address before returning anything.</p>
@@ -2799,7 +2833,10 @@ function AdminScreen() {
           )}
         </div>
       </div>
+      </>
+      )}
 
+      {adminTab === 'transactions' && (
       <div>
         <h2 className="text-sm font-semibold mb-3">Recent Settlements</h2>
         {settlements === null ? (
@@ -2830,6 +2867,7 @@ function AdminScreen() {
           </>
         )}
       </div>
+      )}
     </div>
   );
 }
