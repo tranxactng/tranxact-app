@@ -2775,21 +2775,27 @@ function AdminScreen() {
                 </>
               )}
 
-              {!swConfirmingSweep ? (
-                <button onClick={() => setSwConfirmingSweep(true)} className="w-full bg-amber-500/15 border border-amber-500/40 text-amber-400 rounded-lg py-2 text-xs font-semibold mt-3">
-                  Sweep to Treasury
-                </button>
-              ) : (
-                <div className="mt-3 space-y-2">
-                  <p className="text-xs text-amber-300">This broadcasts a real transaction. Continue?</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => setSwConfirmingSweep(false)} className="bg-neutral-800 rounded-lg py-2 text-xs">Cancel</button>
-                    <button onClick={executeSweep} disabled={swSweeping} className="bg-amber-500 text-black rounded-lg py-2 text-xs font-semibold disabled:opacity-50">
-                      {swSweeping ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : 'Yes, sweep it'}
-                    </button>
+              {(() => {
+                const sweepableAmount = swResult.balance !== undefined ? Number(swResult.sweepable) : Number(swResult.token_balance);
+                if (!(sweepableAmount > 0)) {
+                  return <p className="text-xs text-neutral-600 mt-3">Nothing to sweep, balance is zero.</p>;
+                }
+                return !swConfirmingSweep ? (
+                  <button onClick={() => setSwConfirmingSweep(true)} className="w-full bg-amber-500/15 border border-amber-500/40 text-amber-400 rounded-lg py-2 text-xs font-semibold mt-3">
+                    Sweep to Treasury
+                  </button>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-amber-300">This broadcasts a real transaction. Continue?</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button onClick={() => setSwConfirmingSweep(false)} className="bg-neutral-800 rounded-lg py-2 text-xs">Cancel</button>
+                      <button onClick={executeSweep} disabled={swSweeping} className="bg-amber-500 text-black rounded-lg py-2 text-xs font-semibold disabled:opacity-50">
+                        {swSweeping ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : 'Yes, sweep it'}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           )}
 
@@ -3436,7 +3442,43 @@ function CheckoutPage({ slug }) {
         </div>
       )}
 
-      {notice && (
+      {notice && link.business_name && (
+        <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-5">
+            <Check className="w-6 h-6 text-emerald-400" />
+          </div>
+          <h2 className="text-lg font-bold mb-1">Order placed</h2>
+          <p className="text-sm text-neutral-500 mb-4">{link.title} · in progress with {link.business_name}</p>
+          <p className="text-xs text-neutral-600 font-mono mb-6">Ref: {notice.reference}</p>
+
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 text-left mb-4">
+            <div className="text-xs text-neutral-500 mb-2.5">Contact {link.business_name}</div>
+            <div className="space-y-2">
+              {link.business_contact_phone && (
+                <a href={`https://wa.me/${String(link.business_contact_phone).replace(/[^0-9]/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-neutral-300">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                  WhatsApp
+                </a>
+              )}
+              {link.business_contact_email && (
+                <a href={`mailto:${link.business_contact_email}`} className="flex items-center gap-2 text-sm text-neutral-300">
+                  <Mail className="w-4 h-4 flex-shrink-0" />
+                  {link.business_contact_email}
+                </a>
+              )}
+              {!link.business_contact_phone && !link.business_contact_email && (
+                <p className="text-xs text-neutral-600">No contact details added by this business yet.</p>
+              )}
+            </div>
+          </div>
+
+          <a href={`https://business.tranxact.co/${link.business_slug}`} className="block w-full text-sm text-violet-400 hover:text-violet-300 transition py-2">
+            Back to store
+          </a>
+        </div>
+      )}
+
+      {notice && !link.business_name && (
         <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 text-center">
           <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-5">
             <Check className="w-6 h-6 text-emerald-400" />
