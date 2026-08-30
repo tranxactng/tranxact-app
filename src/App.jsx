@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
-  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, buyAirtime, getServiceVariations, buyData,
+  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance,
@@ -37,7 +37,7 @@ const ASSETS = [
 const BILLS = [
   { id: 'airtime', label: 'Airtime', icon: Smartphone, ready: true },
   { id: 'data', label: 'Data', icon: Wifi, ready: true },
-  { id: 'electricity', label: 'Electricity', icon: Zap, ready: false },
+  { id: 'electricity', label: 'Electricity', icon: Zap, ready: true },
   { id: 'tv', label: 'TV', icon: Tv, ready: false },
   { id: 'betting', label: 'Betting', icon: Trophy, ready: false },
 ];
@@ -865,7 +865,7 @@ function TransactionRow({ tx, onSendAgain }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onSendAgain, onTranxactPay, onAirtime, onData, onSeeAllBills, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
+function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onSendAgain, onTranxactPay, onAirtime, onData, onElectricity, onSeeAllBills, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -903,7 +903,7 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
               label={b.label}
               icon={b.icon}
               ready={b.ready}
-              onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : undefined}
+              onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : b.id === 'electricity' ? onElectricity : undefined}
             />
           ))}
         </div>
@@ -1242,7 +1242,7 @@ const QUICK_AMOUNTS = [100, 200, 500, 1000, 2000];
 
 // The full bills list — the home screen only teases the first 4, this
 // shows every real and upcoming service in one place.
-function AllBillsScreen({ onBack, onAirtime, onData }) {
+function AllBillsScreen({ onBack, onAirtime, onData, onElectricity }) {
   return (
     <div>
       <BackHeader title="Bills & Services" onBack={onBack} />
@@ -1253,10 +1253,233 @@ function AllBillsScreen({ onBack, onAirtime, onData }) {
             label={b.label}
             icon={b.icon}
             ready={b.ready}
-            onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : undefined}
+            onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : b.id === 'electricity' ? onElectricity : undefined}
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+// Real electricity purchase — the one bill type where a mistake actually
+// matters (wrong meter number = someone else gets charged for your power),
+// so this always verifies the real customer name before ever charging
+// anyone, and shows the real prepaid token prominently since that's the
+// actual thing the customer needs, not just a success message.
+const DISCOS = [
+  { id: 'ikeja-electric', label: 'Ikeja Electric (IKEDC)' },
+  { id: 'eko-electric', label: 'Eko Electric (EKEDC)' },
+  { id: 'abuja-electric', label: 'Abuja Electric (AEDC)' },
+  { id: 'ibadan-electric', label: 'Ibadan Electric (IBEDC)' },
+  { id: 'kano-electric', label: 'Kano Electric (KEDCO)' },
+  { id: 'portharcourt-electric', label: 'Port Harcourt Electric (PHED)' },
+  { id: 'jos-electric', label: 'Jos Electric (JED)' },
+  { id: 'kaduna-electric', label: 'Kaduna Electric (KAEDCO)' },
+  { id: 'enugu-electric', label: 'Enugu Electric (EEDC)' },
+  { id: 'benin-electric', label: 'Benin Electric (BEDC)' },
+  { id: 'aba-electric', label: 'ABA Electric' },
+  { id: 'yola-electric', label: 'Yola Electric (YEDC)' },
+];
+
+function ElectricityScreen({ onBack, onDone, hasPin }) {
+  const [step, setStep] = useState('form'); // form | confirm | pin | result
+  const [disco, setDisco] = useState('ikeja-electric');
+  const [meterType, setMeterType] = useState('prepaid');
+  const [meterNumber, setMeterNumber] = useState('');
+  const [phone, setPhone] = useState('');
+  const [amount, setAmount] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verifiedCustomer, setVerifiedCustomer] = useState(null);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+
+  const validPhone = /^0\d{10}$/.test(phone);
+  const validAmount = Number(amount) >= 500;
+  const canContinue = meterNumber.trim().length >= 6 && validPhone && validAmount;
+
+  const handleFormContinue = async () => {
+    setError('');
+    setVerifying(true);
+    try {
+      const v = await verifyMeter(disco, meterNumber.trim(), meterType);
+      setVerifiedCustomer(v);
+      setStep('confirm');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const executePurchase = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await buyElectricity(disco, meterNumber.trim(), meterType, phone, Number(amount));
+      setResult(res);
+      setStep('result');
+    } catch (e) {
+      setError(e.message);
+      setStep('confirm');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = () => {
+    if (hasPin) {
+      setPinError('');
+      setStep('pin');
+      return;
+    }
+    executePurchase();
+  };
+
+  const handlePinSubmit = async () => {
+    setPinError('');
+    setPinLoading(true);
+    try {
+      const valid = await verifyTransactionPin(pin);
+      if (!valid) {
+        setPinError('Incorrect PIN');
+        setPinLoading(false);
+        return;
+      }
+      setPin('');
+      await executePurchase();
+    } catch (e) {
+      setPinError(e.message);
+    } finally {
+      setPinLoading(false);
+    }
+  };
+
+  if (step === 'result' && result) {
+    const isSettled = result.status === 'settled';
+    return (
+      <div>
+        <BackHeader title="Electricity" onBack={onDone} />
+        <div className="flex flex-col items-center text-center py-8">
+          <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${isSettled ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-amber-500/15 border border-amber-500/30'}`}>
+            {isSettled ? <Check className="w-6 h-6 text-emerald-400" /> : <Loader2 className="w-6 h-6 text-amber-400" />}
+          </div>
+          <h2 className="text-lg font-bold mb-1">{isSettled ? 'Payment successful' : 'Still processing'}</h2>
+          <p className="text-sm text-neutral-500 max-w-xs mb-5">
+            {isSettled
+              ? `${fmtNaira(result.amount)} paid to ${verifiedCustomer?.customer_name || 'this meter'}.`
+              : `Your ${fmtNaira(result.amount)} is confirmed and being processed. Check your transaction history for the final result.`}
+          </p>
+          {result.token && (
+            <div className="w-full bg-neutral-950 border border-emerald-500/30 rounded-2xl p-4 text-left">
+              <div className="text-xs text-neutral-500 mb-1.5">Your prepaid token — load this on your meter</div>
+              <div className="font-mono text-sm text-emerald-400 break-all">{result.token}</div>
+            </div>
+          )}
+        </div>
+        <PrimaryButton onClick={onDone}>Done</PrimaryButton>
+      </div>
+    );
+  }
+
+  if (step === 'pin') {
+    return (
+      <div>
+        <BackHeader title="Enter PIN" onBack={() => setStep('confirm')} />
+        <p className="text-sm text-neutral-500 mb-6">Enter your transaction PIN to pay {fmtNaira(Number(amount) || 0)} for this meter.</p>
+        <Field
+          label="Transaction PIN"
+          type="password"
+          inputMode="numeric"
+          value={pin}
+          onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          placeholder="••••"
+        />
+        {pinError && <p className="text-sm text-red-400 mt-3">{pinError}</p>}
+        <PrimaryButton onClick={handlePinSubmit} disabled={pinLoading || pin.length < 4} className="mt-5">
+          {pinLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm'}
+        </PrimaryButton>
+      </div>
+    );
+  }
+
+  if (step === 'confirm') {
+    const discoLabel = DISCOS.find(d => d.id === disco)?.label || disco;
+    return (
+      <div>
+        <BackHeader title="Confirm" onBack={() => setStep('form')} />
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 mb-4">
+          <div className="text-xs text-emerald-400 font-medium mb-1">Meter verified</div>
+          <div className="text-sm font-semibold">{verifiedCustomer?.customer_name}</div>
+          {verifiedCustomer?.address && <div className="text-xs text-neutral-500 mt-0.5">{verifiedCustomer.address}</div>}
+        </div>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Provider</span><span>{discoLabel}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Meter</span><span>{meterNumber} ({meterType})</span></div>
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(Number(amount) || 0)}</span></div>
+        </div>
+        {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
+        <PrimaryButton onClick={handleConfirm} disabled={loading}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm & Pay'}
+        </PrimaryButton>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <BackHeader title="Electricity" onBack={onBack} />
+      <div className="space-y-5">
+        <label className="block">
+          <span className="text-sm text-neutral-400 mb-2 block">Provider</span>
+          <select
+            value={disco}
+            onChange={e => setDisco(e.target.value)}
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm"
+          >
+            {DISCOS.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+          </select>
+        </label>
+        <div>
+          <span className="text-sm text-neutral-400 mb-2 block">Meter type</span>
+          <TabToggle
+            value={meterType}
+            onChange={setMeterType}
+            options={[
+              { value: 'prepaid', label: 'Prepaid' },
+              { value: 'postpaid', label: 'Postpaid' },
+            ]}
+          />
+        </div>
+        <Field
+          label="Meter number"
+          inputMode="numeric"
+          value={meterNumber}
+          onChange={e => setMeterNumber(e.target.value.replace(/\D/g, ''))}
+          placeholder="1111111111111"
+        />
+        <Field
+          label="Phone number"
+          inputMode="numeric"
+          value={phone}
+          onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+          placeholder="08011111111"
+        />
+        <Field
+          label="Amount"
+          inputMode="numeric"
+          value={amount}
+          onChange={e => setAmount(e.target.value.replace(/\D/g, ''))}
+          placeholder="2000"
+        />
+      </div>
+      {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+      <PrimaryButton onClick={handleFormContinue} disabled={!canContinue || verifying} className="mt-6">
+        {verifying ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify & Continue'}
+      </PrimaryButton>
     </div>
   );
 }
@@ -5035,6 +5258,7 @@ function MobileAppRoot() {
           onTranxactPay={() => setTpOpen(true)}
           onAirtime={() => setHomeView('airtime')}
           onData={() => setHomeView('data')}
+          onElectricity={() => setHomeView('electricity')}
           onSeeAllBills={() => setHomeView('allBills')}
           onSeeAll={() => setHomeView('history')}
           onOpenNotifications={() => setHomeView('notifications')}
@@ -5064,6 +5288,14 @@ function MobileAppRoot() {
           onBack={() => setHomeView('main')}
           onAirtime={() => setHomeView('airtime')}
           onData={() => setHomeView('data')}
+          onElectricity={() => setHomeView('electricity')}
+        />
+      )}
+      {tab === 'home' && homeView === 'electricity' && (
+        <ElectricityScreen
+          onBack={() => setHomeView('main')}
+          onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
+          hasPin={!!profile?.pin_hash}
         />
       )}
       {tab === 'home' && homeView === 'airtime' && (
