@@ -585,6 +585,21 @@ const ReceiptCard = React.forwardRef(({ tx }, ref) => {
   const otherPartyLabel = tx.counterparty ? (positive ? 'Sender Details' : 'Recipient Details') : null;
   const maskedRef = tx.id ? `${tx.id.slice(0, 8)}${'*'.repeat(4)}${tx.id.slice(-4)}` : '';
 
+  // Bills, withdrawals, and bank deposits all carry real, specific detail
+  // in their description now (what was bought, whose meter, which bank
+  // account) — worth showing on the receipt itself, not just in a list row.
+  // Reversal/internal text is deliberately excluded, that's not something
+  // a customer sharing a receipt should ever see.
+  const detailTypes = ['bill_payment', 'withdrawal', 'send_bank', 'fund_bank', 'crypto_deposit'];
+  const showDescription = detailTypes.includes(tx.type) && tx.description && !/^reversal/i.test(tx.description);
+  const detailLabel = {
+    bill_payment: 'Purchase Details',
+    withdrawal: 'Bank Details',
+    send_bank: 'Bank Details',
+    fund_bank: 'Received From',
+    crypto_deposit: 'Received From',
+  }[tx.type] || 'Details';
+
   return (
     <div
       ref={ref}
@@ -633,6 +648,12 @@ const ReceiptCard = React.forwardRef(({ tx }, ref) => {
             <div className="text-xs text-neutral-500 mb-1">{otherPartyLabel}</div>
             <div className="text-sm font-semibold text-white">@{tx.counterparty}</div>
             <div className="text-xs text-neutral-400">Tranxact user</div>
+          </div>
+        )}
+        {showDescription && (
+          <div>
+            <div className="text-xs text-neutral-500 mb-1">{detailLabel}</div>
+            <div className="text-sm font-semibold text-white break-words">{tx.description}</div>
           </div>
         )}
         <div>
