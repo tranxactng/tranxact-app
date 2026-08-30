@@ -125,6 +125,25 @@ export async function sendToUser(username, amount) {
   return data; // { success, transaction_id, recipient_username }
 }
 
+// Calls the deployed edge function to buy real airtime through VTpass.
+// Response shape: { success, status: 'settled'|'processing', bill_id, amount }
+export async function buyAirtime(network, phone, amount) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/buy-airtime`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ network, phone, amount }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Airtime purchase failed');
+  return data;
+}
+
 // Calls the deployed edge function to get (or create) a deposit address for the given asset.
 export async function getDepositAddress(assetSymbol, network) {
   const { data: { session } } = await supabase.auth.getSession();
