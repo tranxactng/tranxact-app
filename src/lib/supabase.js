@@ -144,6 +144,39 @@ export async function buyAirtime(network, phone, amount) {
   return data;
 }
 
+// Fetches the real, live list of data plans (or TV packages) for a given
+// VTpass serviceID, with real current prices — never hardcoded, since
+// VTpass can add/remove/reprice plans at any time.
+export async function getServiceVariations(serviceID) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/bills-get-variations?serviceID=${encodeURIComponent(serviceID)}`, {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Could not load plans');
+  return data; // { service_name, variations: [{ code, name, amount }] }
+}
+
+// Calls the deployed edge function to buy a real data bundle through VTpass.
+export async function buyData(network, phone, variationCode, planName, amount) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/buy-data`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ network, phone, variation_code: variationCode, plan_name: planName, amount }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Data purchase failed');
+  return data;
+}
+
 // Calls the deployed edge function to get (or create) a deposit address for the given asset.
 export async function getDepositAddress(assetSymbol, network) {
   const { data: { session } } = await supabase.auth.getSession();
