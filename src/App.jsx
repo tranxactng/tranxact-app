@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
-  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser,
+  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, buyAirtime,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance,
@@ -35,11 +35,11 @@ const ASSETS = [
 ];
 
 const BILLS = [
-  { label: 'Airtime', icon: Smartphone },
-  { label: 'Data', icon: Wifi },
-  { label: 'Electricity', icon: Zap },
-  { label: 'TV', icon: Tv },
-  { label: 'Betting', icon: Trophy },
+  { id: 'airtime', label: 'Airtime', icon: Smartphone, ready: true },
+  { id: 'data', label: 'Data', icon: Wifi, ready: false },
+  { id: 'electricity', label: 'Electricity', icon: Zap, ready: false },
+  { id: 'tv', label: 'TV', icon: Tv, ready: false },
+  { id: 'betting', label: 'Betting', icon: Trophy, ready: false },
 ];
 
 // Maps a real transactions-table row to what TransactionRow expects to render
@@ -559,13 +559,17 @@ function ActionButton({ label, sub, icon: Icon, onClick }) {
   );
 }
 
-function ServiceTile({ label, icon: Icon }) {
+function ServiceTile({ label, icon: Icon, onClick, ready = true }) {
   return (
-    <button className="flex flex-col items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-2xl py-4 hover:bg-neutral-900 transition active:scale-[0.98]">
+    <button
+      onClick={ready ? onClick : undefined}
+      className={`flex flex-col items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-2xl py-4 transition active:scale-[0.98] ${ready ? 'hover:bg-neutral-900' : 'opacity-40 cursor-not-allowed'}`}
+    >
       <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
         <Icon className="w-4 h-4" />
       </div>
       <span className="text-xs text-neutral-400">{label}</span>
+      {!ready && <span className="text-[9px] text-neutral-600">Soon</span>}
     </button>
   );
 }
@@ -861,7 +865,7 @@ function TransactionRow({ tx, onSendAgain }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onSendAgain, onTranxactPay, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
+function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onSendAgain, onTranxactPay, onAirtime, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -893,7 +897,15 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
           <button className="text-xs text-neutral-500 hover:text-white transition">See all</button>
         </div>
         <div className="grid grid-cols-5 gap-2">
-          {BILLS.map(b => <ServiceTile key={b.label} label={b.label} icon={b.icon} />)}
+          {BILLS.map(b => (
+            <ServiceTile
+              key={b.label}
+              label={b.label}
+              icon={b.icon}
+              ready={b.ready}
+              onClick={b.id === 'airtime' ? onAirtime : undefined}
+            />
+          ))}
         </div>
       </div>
 
@@ -1217,6 +1229,189 @@ function FundWalletScreen({ onBack, username = '' }) {
 }
 
 // ---------- Send (naira only — Tranxact user or bank account) ----------
+// Real airtime purchase through VTpass, following the exact same
+// form -> confirm -> pin -> result pattern already proven in SendScreen,
+// so this feels consistent rather than bolted on.
+const NETWORKS = [
+  { id: 'mtn', label: 'MTN' },
+  { id: 'glo', label: 'Glo' },
+  { id: 'airtel', label: 'Airtel' },
+  { id: 'etisalat', label: '9mobile' },
+];
+const QUICK_AMOUNTS = [100, 200, 500, 1000, 2000];
+
+function AirtimeScreen({ onBack, onDone, hasPin }) {
+  const [step, setStep] = useState('form'); // form | confirm | pin | result
+  const [network, setNetwork] = useState('mtn');
+  const [phone, setPhone] = useState('');
+  const [amount, setAmount] = useState('');
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null); // { status, amount } once we actually hear back
+
+  const validPhone = /^0\d{10}$/.test(phone);
+  const validAmount = Number(amount) >= 50;
+  const canContinue = validPhone && validAmount;
+
+  const executePurchase = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await buyAirtime(network, phone, Number(amount));
+      setResult(res);
+      setStep('result');
+    } catch (e) {
+      setError(e.message);
+      setStep('confirm');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = () => {
+    if (hasPin) {
+      setPinError('');
+      setStep('pin');
+      return;
+    }
+    executePurchase();
+  };
+
+  const handlePinSubmit = async () => {
+    setPinError('');
+    setPinLoading(true);
+    try {
+      const valid = await verifyTransactionPin(pin);
+      if (!valid) {
+        setPinError('Incorrect PIN');
+        setPinLoading(false);
+        return;
+      }
+      setPin('');
+      await executePurchase();
+    } catch (e) {
+      setPinError(e.message);
+    } finally {
+      setPinLoading(false);
+    }
+  };
+
+  if (step === 'result' && result) {
+    const isSettled = result.status === 'settled';
+    return (
+      <div>
+        <BackHeader title="Airtime" onBack={onDone} />
+        <div className="flex flex-col items-center text-center py-10">
+          <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${isSettled ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-amber-500/15 border border-amber-500/30'}`}>
+            {isSettled ? <Check className="w-6 h-6 text-emerald-400" /> : <Loader2 className="w-6 h-6 text-amber-400" />}
+          </div>
+          <h2 className="text-lg font-bold mb-1">{isSettled ? 'Airtime delivered' : 'Still processing'}</h2>
+          <p className="text-sm text-neutral-500 max-w-xs">
+            {isSettled
+              ? `${fmtNaira(result.amount)} airtime sent to ${phone}.`
+              : `Your ${fmtNaira(result.amount)} is confirmed and being delivered by the network. This can take a few minutes — check your transaction history for the final result.`}
+          </p>
+        </div>
+        <PrimaryButton onClick={onDone}>Done</PrimaryButton>
+      </div>
+    );
+  }
+
+  if (step === 'pin') {
+    return (
+      <div>
+        <BackHeader title="Enter PIN" onBack={() => setStep('confirm')} />
+        <p className="text-sm text-neutral-500 mb-6">Enter your transaction PIN to buy {fmtNaira(Number(amount) || 0)} airtime for {phone}.</p>
+        <Field
+          label="Transaction PIN"
+          type="password"
+          inputMode="numeric"
+          value={pin}
+          onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          placeholder="••••"
+        />
+        {pinError && <p className="text-sm text-red-400 mt-3">{pinError}</p>}
+        <PrimaryButton onClick={handlePinSubmit} disabled={pinLoading || pin.length < 4} className="mt-5">
+          {pinLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm'}
+        </PrimaryButton>
+      </div>
+    );
+  }
+
+  if (step === 'confirm') {
+    const networkLabel = NETWORKS.find(n => n.id === network)?.label || network;
+    return (
+      <div>
+        <BackHeader title="Confirm" onBack={() => setStep('form')} />
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Network</span><span>{networkLabel}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Phone</span><span>{phone}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(Number(amount) || 0)}</span></div>
+        </div>
+        {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
+        <PrimaryButton onClick={handleConfirm} disabled={loading}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm & Buy'}
+        </PrimaryButton>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <BackHeader title="Airtime" onBack={onBack} />
+      <div className="space-y-5">
+        <div>
+          <span className="text-sm text-neutral-400 mb-2 block">Network</span>
+          <div className="grid grid-cols-4 gap-2">
+            {NETWORKS.map(n => (
+              <button
+                key={n.id}
+                onClick={() => setNetwork(n.id)}
+                className={`py-2.5 rounded-xl text-xs font-semibold transition ${network === n.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400'}`}
+              >
+                {n.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Field
+          label="Phone number"
+          inputMode="numeric"
+          value={phone}
+          onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+          placeholder="08011111111"
+        />
+        <div>
+          <Field
+            label="Amount"
+            inputMode="numeric"
+            value={amount}
+            onChange={e => setAmount(e.target.value.replace(/\D/g, ''))}
+            placeholder="500"
+          />
+          <div className="flex flex-wrap gap-2 mt-2.5">
+            {QUICK_AMOUNTS.map(a => (
+              <button
+                key={a}
+                onClick={() => setAmount(String(a))}
+                className="bg-neutral-900 border border-neutral-800 rounded-full px-3.5 py-1.5 text-xs text-neutral-300"
+              >
+                {fmtNaira(a)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <PrimaryButton onClick={() => setStep('confirm')} disabled={!canContinue} className="mt-6">
+        Continue
+      </PrimaryButton>
+    </div>
+  );
+}
+
 function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
   const [mode, setMode] = useState('user');
   const [step, setStep] = useState('form');
@@ -4621,6 +4816,7 @@ function MobileAppRoot() {
           onSend={() => setHomeView('send')}
           onSendAgain={(username) => { setSendAgainUsername(username); setHomeView('send'); }}
           onTranxactPay={() => setTpOpen(true)}
+          onAirtime={() => setHomeView('airtime')}
           onSeeAll={() => setHomeView('history')}
           onOpenNotifications={() => setHomeView('notifications')}
           unreadCount={unreadCount}
@@ -4642,6 +4838,13 @@ function MobileAppRoot() {
           onDone={() => { if (profile?.id) loadUserData(profile.id); setSendAgainUsername(''); setHomeView('main'); }}
           hasPin={!!profile?.pin_hash}
           initialUsername={sendAgainUsername}
+        />
+      )}
+      {tab === 'home' && homeView === 'airtime' && (
+        <AirtimeScreen
+          onBack={() => setHomeView('main')}
+          onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
+          hasPin={!!profile?.pin_hash}
         />
       )}
       {tab === 'home' && homeView === 'history' && (
