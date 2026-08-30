@@ -177,6 +177,44 @@ export async function buyData(network, phone, variationCode, planName, amount) {
   return data;
 }
 
+// Verifies a real meter number belongs to a real customer before anyone
+// gets charged for it — read-only, no money moves here.
+export async function verifyMeter(serviceID, billersCode, type) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/bills-verify-meter`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ serviceID, billersCode, type }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Could not verify meter');
+  return data; // { customer_name, address, meter_number, account_type, meter_type }
+}
+
+// Calls the deployed edge function to buy real electricity through VTpass.
+// Response includes a real prepaid token when applicable.
+export async function buyElectricity(disco, meterNumber, meterType, phone, amount) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/buy-electricity`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ disco, meter_number: meterNumber, meter_type: meterType, phone, amount }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Electricity purchase failed');
+  return data; // { success, status, bill_id, amount, token }
+}
+
 // Calls the deployed edge function to get (or create) a deposit address for the given asset.
 export async function getDepositAddress(assetSymbol, network) {
   const { data: { session } } = await supabase.auth.getSession();
