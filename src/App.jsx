@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
-  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity,
+  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance,
@@ -38,7 +38,7 @@ const BILLS = [
   { id: 'airtime', label: 'Airtime', icon: Smartphone, ready: true },
   { id: 'data', label: 'Data', icon: Wifi, ready: true },
   { id: 'electricity', label: 'Electricity', icon: Zap, ready: true },
-  { id: 'tv', label: 'TV', icon: Tv, ready: false },
+  { id: 'tv', label: 'TV', icon: Tv, ready: true },
   { id: 'betting', label: 'Betting', icon: Trophy, ready: false },
 ];
 
@@ -886,7 +886,7 @@ function TransactionRow({ tx, onSendAgain }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onSendAgain, onTranxactPay, onAirtime, onData, onElectricity, onSeeAllBills, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
+function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onSendAgain, onTranxactPay, onAirtime, onData, onElectricity, onTV, onSeeAllBills, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -924,7 +924,7 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
               label={b.label}
               icon={b.icon}
               ready={b.ready}
-              onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : b.id === 'electricity' ? onElectricity : undefined}
+              onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : b.id === 'electricity' ? onElectricity : b.id === 'tv' ? onTV : undefined}
             />
           ))}
         </div>
@@ -1263,7 +1263,7 @@ const QUICK_AMOUNTS = [100, 200, 500, 1000, 2000];
 
 // The full bills list — the home screen only teases the first 4, this
 // shows every real and upcoming service in one place.
-function AllBillsScreen({ onBack, onAirtime, onData, onElectricity }) {
+function AllBillsScreen({ onBack, onAirtime, onData, onElectricity, onTV }) {
   return (
     <div>
       <BackHeader title="Bills & Services" onBack={onBack} />
@@ -1274,7 +1274,7 @@ function AllBillsScreen({ onBack, onAirtime, onData, onElectricity }) {
             label={b.label}
             icon={b.icon}
             ready={b.ready}
-            onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : b.id === 'electricity' ? onElectricity : undefined}
+            onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : b.id === 'electricity' ? onElectricity : b.id === 'tv' ? onTV : undefined}
           />
         ))}
       </div>
@@ -1301,6 +1301,234 @@ const DISCOS = [
   { id: 'aba-electric', label: 'ABA Electric' },
   { id: 'yola-electric', label: 'Yola Electric (YEDC)' },
 ];
+
+// Real TV subscription purchase — verifies the real smartcard/IUC number
+// first (showing the real customer name before charging anyone, same
+// discipline as electricity), then lets them pick from real, live
+// packages fetched from VTpass, same pattern as data plans.
+const TV_PROVIDERS = [
+  { id: 'dstv', label: 'DStv' },
+  { id: 'gotv', label: 'GOtv' },
+  { id: 'startimes', label: 'StarTimes' },
+];
+
+function TVScreen({ onBack, onDone, hasPin }) {
+  const [step, setStep] = useState('form'); // form | packages | confirm | pin | result
+  const [provider, setProvider] = useState('dstv');
+  const [smartcardNumber, setSmartcardNumber] = useState('');
+  const [phone, setPhone] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verifiedCustomer, setVerifiedCustomer] = useState(null);
+  const [variations, setVariations] = useState(null);
+  const [variationsError, setVariationsError] = useState('');
+  const [selectedPackage, setSelectedPackage] = useState(null);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+
+  const validPhone = /^0\d{10}$/.test(phone);
+  const canVerify = smartcardNumber.trim().length >= 6 && validPhone;
+
+  const handleVerify = async () => {
+    setError('');
+    setVerifying(true);
+    try {
+      const v = await verifyMeter(provider, smartcardNumber.trim());
+      setVerifiedCustomer(v);
+      setStep('packages');
+      const res = await getServiceVariations(provider);
+      setVariations(res.variations || []);
+    } catch (e) {
+      setError(e.message);
+      setVariationsError(e.message);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const executePurchase = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await buyTV(provider, smartcardNumber.trim(), selectedPackage.code, selectedPackage.name, phone, selectedPackage.amount);
+      setResult(res);
+      setStep('result');
+    } catch (e) {
+      setError(e.message);
+      setStep('confirm');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = () => {
+    if (hasPin) {
+      setPinError('');
+      setStep('pin');
+      return;
+    }
+    executePurchase();
+  };
+
+  const handlePinSubmit = async () => {
+    setPinError('');
+    setPinLoading(true);
+    try {
+      const valid = await verifyTransactionPin(pin);
+      if (!valid) {
+        setPinError('Incorrect PIN');
+        setPinLoading(false);
+        return;
+      }
+      setPin('');
+      await executePurchase();
+    } catch (e) {
+      setPinError(e.message);
+    } finally {
+      setPinLoading(false);
+    }
+  };
+
+  if (step === 'result' && result) {
+    const isSettled = result.status === 'settled';
+    return (
+      <div>
+        <BackHeader title="TV Subscription" onBack={onDone} />
+        <div className="flex flex-col items-center text-center py-10">
+          <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${isSettled ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-amber-500/15 border border-amber-500/30'}`}>
+            {isSettled ? <Check className="w-6 h-6 text-emerald-400" /> : <Loader2 className="w-6 h-6 text-amber-400" />}
+          </div>
+          <h2 className="text-lg font-bold mb-1">{isSettled ? 'Subscription active' : 'Still processing'}</h2>
+          <p className="text-sm text-neutral-500 max-w-xs">
+            {isSettled
+              ? `${selectedPackage?.name || 'Your package'} activated for ${verifiedCustomer?.customer_name || 'this smartcard'}.`
+              : `Your ${fmtNaira(result.amount)} is confirmed and being processed. Check your transaction history for the final result.`}
+          </p>
+        </div>
+        <PrimaryButton onClick={onDone}>Done</PrimaryButton>
+      </div>
+    );
+  }
+
+  if (step === 'pin') {
+    return (
+      <div>
+        <BackHeader title="Enter PIN" onBack={() => setStep('confirm')} />
+        <p className="text-sm text-neutral-500 mb-6">Enter your transaction PIN to pay {fmtNaira(selectedPackage?.amount || 0)} for {selectedPackage?.name}.</p>
+        <Field
+          label="Transaction PIN"
+          type="password"
+          inputMode="numeric"
+          value={pin}
+          onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          placeholder="••••"
+        />
+        {pinError && <p className="text-sm text-red-400 mt-3">{pinError}</p>}
+        <PrimaryButton onClick={handlePinSubmit} disabled={pinLoading || pin.length < 4} className="mt-5">
+          {pinLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm'}
+        </PrimaryButton>
+      </div>
+    );
+  }
+
+  if (step === 'confirm') {
+    const providerLabel = TV_PROVIDERS.find(p => p.id === provider)?.label || provider;
+    return (
+      <div>
+        <BackHeader title="Confirm" onBack={() => setStep('packages')} />
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 mb-4">
+          <div className="text-xs text-emerald-400 font-medium mb-1">Smartcard verified</div>
+          <div className="text-sm font-semibold">{verifiedCustomer?.customer_name}</div>
+        </div>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Provider</span><span>{providerLabel}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Smartcard</span><span>{smartcardNumber}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Package</span><span className="text-right max-w-[60%]">{selectedPackage?.name}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(selectedPackage?.amount || 0)}</span></div>
+        </div>
+        {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
+        <PrimaryButton onClick={handleConfirm} disabled={loading}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm & Pay'}
+        </PrimaryButton>
+      </div>
+    );
+  }
+
+  if (step === 'packages') {
+    return (
+      <div>
+        <BackHeader title="Choose Package" onBack={() => setStep('form')} />
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 mb-5">
+          <div className="text-xs text-emerald-400 font-medium mb-1">Smartcard verified</div>
+          <div className="text-sm font-semibold">{verifiedCustomer?.customer_name}</div>
+        </div>
+        {variations === null ? (
+          <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-neutral-600" /></div>
+        ) : variationsError ? (
+          <p className="text-sm text-red-400 py-4">{variationsError}</p>
+        ) : variations.length === 0 ? (
+          <p className="text-sm text-neutral-600 py-4">No packages available right now.</p>
+        ) : (
+          <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+            {variations.map(v => (
+              <button
+                key={v.code}
+                onClick={() => { setSelectedPackage(v); setStep('confirm'); }}
+                className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-left transition bg-neutral-900 border border-neutral-800 text-neutral-300 hover:border-neutral-700"
+              >
+                <span className="text-sm">{v.name}</span>
+                <span className="text-sm font-mono flex-shrink-0 ml-3">{fmtNaira(v.amount)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <BackHeader title="TV Subscription" onBack={onBack} />
+      <div className="space-y-5">
+        <div>
+          <span className="text-sm text-neutral-400 mb-2 block">Provider</span>
+          <div className="grid grid-cols-3 gap-2">
+            {TV_PROVIDERS.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setProvider(p.id)}
+                className={`py-2.5 rounded-xl text-xs font-semibold transition ${provider === p.id ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400'}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Field
+          label="Smartcard / IUC number"
+          inputMode="numeric"
+          value={smartcardNumber}
+          onChange={e => setSmartcardNumber(e.target.value.replace(/\D/g, ''))}
+          placeholder="1212121212"
+        />
+        <Field
+          label="Phone number"
+          inputMode="numeric"
+          value={phone}
+          onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+          placeholder="08011111111"
+        />
+      </div>
+      {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+      <PrimaryButton onClick={handleVerify} disabled={!canVerify || verifying} className="mt-6">
+        {verifying ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify & Continue'}
+      </PrimaryButton>
+    </div>
+  );
+}
 
 function ElectricityScreen({ onBack, onDone, hasPin }) {
   const [step, setStep] = useState('form'); // form | confirm | pin | result
@@ -5280,6 +5508,7 @@ function MobileAppRoot() {
           onAirtime={() => setHomeView('airtime')}
           onData={() => setHomeView('data')}
           onElectricity={() => setHomeView('electricity')}
+          onTV={() => setHomeView('tv')}
           onSeeAllBills={() => setHomeView('allBills')}
           onSeeAll={() => setHomeView('history')}
           onOpenNotifications={() => setHomeView('notifications')}
@@ -5310,6 +5539,14 @@ function MobileAppRoot() {
           onAirtime={() => setHomeView('airtime')}
           onData={() => setHomeView('data')}
           onElectricity={() => setHomeView('electricity')}
+          onTV={() => setHomeView('tv')}
+        />
+      )}
+      {tab === 'home' && homeView === 'tv' && (
+        <TVScreen
+          onBack={() => setHomeView('main')}
+          onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
+          hasPin={!!profile?.pin_hash}
         />
       )}
       {tab === 'home' && homeView === 'electricity' && (
