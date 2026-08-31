@@ -177,7 +177,23 @@ export async function buyData(network, phone, variationCode, planName, amount) {
   return data;
 }
 
-// Verifies a real meter number belongs to a real customer before anyone
+// Calls the deployed edge function to buy a real TV subscription through VTpass.
+export async function buyTV(provider, smartcardNumber, variationCode, packageName, phone, amount) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/buy-tv`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ provider, smartcard_number: smartcardNumber, variation_code: variationCode, package_name: packageName, phone, amount }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'TV subscription purchase failed');
+  return data;
+}
 // gets charged for it — read-only, no money moves here.
 export async function verifyMeter(serviceID, billersCode, type) {
   const { data: { session } } = await supabase.auth.getSession();
