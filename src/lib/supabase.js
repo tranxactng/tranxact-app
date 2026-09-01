@@ -348,6 +348,14 @@ export async function adminCheckTronBalance(username, asset) {
   return callAdminFunction('admin-check-tron-balance', { username, asset });
 }
 
+export async function adminSweepTron(action, username, asset) {
+  return callAdminFunction('admin-sweep-tron', { action, username, asset });
+}
+
+export async function adminCheckBtcBalance(username) {
+  return callAdminFunction('admin-check-btc-balance', { username });
+}
+
 // Every existing account has a null full_name because the signup trigger
 // never read it from metadata (now fixed for new signups) — this is how an
 // existing account fills theirs in.
