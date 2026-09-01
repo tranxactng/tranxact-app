@@ -10,7 +10,7 @@ import {
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
-  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance,
+  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminCheckBtcBalance,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
@@ -2847,6 +2847,12 @@ function AdminScreen() {
   const [trChecking, setTrChecking] = useState(false);
   const [trResult, setTrResult] = useState(null);
   const [trError, setTrError] = useState('');
+  const [trSweeping, setTrSweeping] = useState(false);
+  const [trConfirmingSweep, setTrConfirmingSweep] = useState(false);
+  const [btcUsername, setBtcUsername] = useState('');
+  const [btcChecking, setBtcChecking] = useState(false);
+  const [btcResult, setBtcResult] = useState(null);
+  const [btcError, setBtcError] = useState('');
 
   const loadStats = async () => {
     try {
@@ -2945,6 +2951,7 @@ function AdminScreen() {
   const checkTronBalance = async () => {
     setTrError('');
     setTrResult(null);
+    setTrConfirmingSweep(false);
     setTrChecking(true);
     try {
       const res = await adminCheckTronBalance(trUsername.trim().toLowerCase().replace(/^@/, ''), trAsset);
@@ -2953,6 +2960,34 @@ function AdminScreen() {
       setTrError(e.message);
     } finally {
       setTrChecking(false);
+    }
+  };
+
+  const executeTronSweep = async () => {
+    setTrError('');
+    setTrSweeping(true);
+    try {
+      const res = await adminSweepTron('sweep', trUsername.trim().toLowerCase().replace(/^@/, ''), trAsset);
+      setTrResult({ ...trResult, swept: true, tx_hash: res.tx_hash, swept_amount: res.amount });
+      setTrConfirmingSweep(false);
+    } catch (e) {
+      setTrError(e.message);
+    } finally {
+      setTrSweeping(false);
+    }
+  };
+
+  const checkBtcBalance = async () => {
+    setBtcError('');
+    setBtcResult(null);
+    setBtcChecking(true);
+    try {
+      const res = await adminCheckBtcBalance(btcUsername.trim().toLowerCase().replace(/^@/, ''));
+      setBtcResult(res);
+    } catch (e) {
+      setBtcError(e.message);
+    } finally {
+      setBtcChecking(false);
     }
   };
 
@@ -3695,17 +3730,17 @@ function AdminScreen() {
       </div>
 
       <div>
-        <h2 className="text-sm font-semibold mb-1">Tron Balance Check (read-only)</h2>
-        <p className="text-xs text-neutral-500 mb-3">TRX and USDT-TRC20 balance lookup. Sweeping isn't built for Tron yet, this only confirms what's actually there.</p>
+        <h2 className="text-sm font-semibold mb-1">Tron Sweep (TRX / USDT-TRC20)</h2>
+        <p className="text-xs text-neutral-500 mb-3">USDT sweeps automatically fund the address with TRX first if it has none for energy.</p>
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
           <div className="grid grid-cols-2 gap-2 mb-3">
             <input
               value={trUsername}
-              onChange={e => { setTrUsername(e.target.value); setTrResult(null); setTrError(''); }}
+              onChange={e => { setTrUsername(e.target.value); setTrResult(null); setTrError(''); setTrConfirmingSweep(false); }}
               placeholder="username"
               className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-violet-500"
             />
-            <select value={trAsset} onChange={e => { setTrAsset(e.target.value); setTrResult(null); }} className="bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2.5 text-sm text-white">
+            <select value={trAsset} onChange={e => { setTrAsset(e.target.value); setTrResult(null); setTrConfirmingSweep(false); }} className="bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2.5 text-sm text-white">
               <option value="TRX">TRX</option>
               <option value="USDT">USDT</option>
             </select>
@@ -3718,7 +3753,67 @@ function AdminScreen() {
             <div className="mt-3 bg-black/40 border border-neutral-800 rounded-lg p-3 space-y-1.5">
               <div className="text-[11px] text-neutral-500">Address</div>
               <div className="text-xs font-mono break-all mb-2">{trResult.address}</div>
-              <div className="text-xs">Balance: <span className="font-mono">{trResult.balance} {trResult.asset}</span></div>
+              {trResult.swept ? (
+                <>
+                  <div className="text-xs text-emerald-400">Swept {trResult.swept_amount} {trAsset}</div>
+                  <div className="text-[11px] text-neutral-500 font-mono break-all mt-1">{trResult.tx_hash}</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-xs">Balance: <span className="font-mono">{trResult.balance ?? trResult.token_balance} {trResult.asset}</span></div>
+                  {trResult.sweepable !== undefined && <div className="text-xs">Sweepable: <span className="font-mono text-emerald-400">{trResult.sweepable} {trResult.asset}</span></div>}
+                  {trResult.native_gas_balance !== undefined && <div className="text-xs text-neutral-500">TRX for energy: <span className="font-mono">{trResult.native_gas_balance}</span></div>}
+                  {(() => {
+                    const sweepableAmount = trResult.sweepable !== undefined ? Number(trResult.sweepable) : Number(trResult.token_balance);
+                    if (!(sweepableAmount > 0)) {
+                      return <p className="text-xs text-neutral-600 mt-3">Nothing to sweep, balance is zero.</p>;
+                    }
+                    return !trConfirmingSweep ? (
+                      <button onClick={() => setTrConfirmingSweep(true)} className="w-full bg-amber-500/15 border border-amber-500/40 text-amber-400 rounded-lg py-2 text-xs font-semibold mt-3">
+                        Sweep to Treasury
+                      </button>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-xs text-amber-300">This broadcasts a real transaction. Continue?</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button onClick={() => setTrConfirmingSweep(false)} className="bg-neutral-800 rounded-lg py-2 text-xs">Cancel</button>
+                          <button onClick={executeTronSweep} disabled={trSweeping} className="bg-amber-500 text-black rounded-lg py-2 text-xs font-semibold disabled:opacity-50">
+                            {trSweeping ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : 'Yes, sweep it'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-1">Bitcoin Balance Check (read-only)</h2>
+        <p className="text-xs text-neutral-500 mb-3">Confirms what's actually on a real BTC address. Sweeping isn't built for Bitcoin yet.</p>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+          <input
+            value={btcUsername}
+            onChange={e => { setBtcUsername(e.target.value); setBtcResult(null); setBtcError(''); }}
+            placeholder="username"
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-violet-500 mb-3"
+          />
+          <button onClick={checkBtcBalance} disabled={btcChecking || !btcUsername.trim()} className="w-full bg-neutral-800 rounded-lg py-2.5 text-sm font-semibold disabled:opacity-40">
+            {btcChecking ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Check Balance'}
+          </button>
+          {btcError && <p className="text-xs text-red-400 mt-2">{btcError}</p>}
+          {btcResult && (
+            <div className="mt-3 bg-black/40 border border-neutral-800 rounded-lg p-3 space-y-1.5">
+              <div className="text-[11px] text-neutral-500">Address</div>
+              <div className="text-xs font-mono break-all mb-2">{btcResult.address}</div>
+              <div className="text-xs">Confirmed: <span className="font-mono">{btcResult.confirmed_balance_btc} BTC</span></div>
+              {Number(btcResult.unconfirmed_balance_btc) !== 0 && (
+                <div className="text-xs">Unconfirmed: <span className="font-mono">{btcResult.unconfirmed_balance_btc} BTC</span></div>
+              )}
+              <div className="text-xs text-neutral-500">{btcResult.utxo_count} unspent output{btcResult.utxo_count === 1 ? '' : 's'}</div>
             </div>
           )}
         </div>
