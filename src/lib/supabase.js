@@ -356,6 +356,10 @@ export async function adminCheckBtcBalance(username) {
   return callAdminFunction('admin-check-btc-balance', { username });
 }
 
+export async function adminCheckSolBalance(username, asset) {
+  return callAdminFunction('admin-check-sol-balance', { username, asset });
+}
+
 // Every existing account has a null full_name because the signup trigger
 // never read it from metadata (now fixed for new signups) — this is how an
 // existing account fills theirs in.
@@ -475,10 +479,39 @@ export async function createCartCheckout(businessSlug, items) {
 export async function getMyStorefrontOrders(businessId) {
   const { data, error } = await supabase
     .from('storefront_orders')
-    .select('id, order_number, quantity, status, customer_name, customer_contact, created_at, payment_links(title, amount, image_url)')
+    .select('id, order_number, quantity, status, customer_name, customer_contact, created_at, access_token, payment_links(title, amount, image_url)')
     .eq('business_id', businessId)
     .order('created_at', { ascending: false });
   return { data, error };
+}
+
+// Merchant-only, ownership-checked server-side. Enforces a real sequence
+// (paid -> processing -> ready -> completed), can't skip steps.
+export async function updateStorefrontOrderStatus(orderId, newStatus) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/update-storefront-order-status`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ order_id: orderId, new_status: newStatus }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update order');
+  return data;
+}
+
+// Public, but genuinely secure — access is via a real random token, never
+// the sequential order_number, so this never needs a login to work for a
+// guest customer, and never leaks someone else's order by guessing.
+export async function getStorefrontOrderByToken(token) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/get-storefront-order?token=${encodeURIComponent(token)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Order not found');
+  return data;
 }
 
 export async function getMyStorefrontCustomers(businessId) {
@@ -555,7 +588,7 @@ export async function updateBusiness(businessId, updates) {
 export async function getMyBusinessProducts(businessId) {
   const { data, error } = await supabase
     .from('payment_links')
-    .select('id, slug, title, description, link_type, amount, status, product_type, image_url, inventory, created_at')
+    .select('id, slug, title, description, link_type, amount, status, product_type, image_url, inventory, fulfillment_type, fulfillment_instructions, created_at')
     .eq('business_id', businessId)
     .order('created_at', { ascending: false });
   return { data, error };
@@ -661,15 +694,47 @@ export async function getMyTranxactPayments() {
 
 // Public — no auth required, since a checkout payer often isn't signed in at all.
 // Creates a real backend record of the claim; does not confirm or settle anything.
-export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_amount }) {
+export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_amount, customer_name, customer_email, customer_phone, delivery_address, idempotency_key }) {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/notify-payment-sent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug, method, crypto_asset, claimed_amount }),
+    body: JSON.stringify({ slug, method, crypto_asset, claimed_amount, customer_name, customer_email, customer_phone, delivery_address, idempotency_key }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to record payment notice');
-  return data; // { success, notice_id, reference }
+  if (!res.ok) {
+    const err = new Error(data.error || 'Failed to record payment notice');
+    err.reason = data.reason; // 'business_paused' | 'sold_out' — real, specific states
+    throw err;
+  }
+  return data; // { success, notice_id, reference, deduplicated? }
+}
+
+// §38 — pause or resume the whole storefront. Existing orders stay intact.
+export async function setStorefrontPaused(isPaused) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/manage-storefront-settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action: 'set_paused', is_paused: isPaused }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update store status');
+  return data;
+}
+
+// §7 — the business declares how it actually fulfils a given item.
+export async function setItemFulfillment(linkSlug, fulfillmentType, instructions) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/manage-storefront-settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action: 'set_fulfillment', link_slug: linkSlug, fulfillment_type: fulfillmentType, fulfillment_instructions: instructions }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update fulfillment');
+  return data;
 }
 
 export async function adminListPaymentNotices() {
