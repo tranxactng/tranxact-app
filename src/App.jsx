@@ -10,13 +10,13 @@ import {
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
-  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminCheckBtcBalance,
+  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminCheckBtcBalance, adminCheckSolBalance,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, createStorefrontEvent, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
-  updateStorefrontItem, setStorefrontItemStatus, deleteStorefrontItem, duplicateStorefrontItem, createCartCheckout, getMyStorefrontOrders, getMyStorefrontCustomers, trackStorefrontEvent, getStorefrontAnalytics,
+  updateStorefrontItem, setStorefrontItemStatus, deleteStorefrontItem, duplicateStorefrontItem, createCartCheckout, getMyStorefrontOrders, getMyStorefrontCustomers, trackStorefrontEvent, getStorefrontAnalytics, updateStorefrontOrderStatus, getStorefrontOrderByToken, setStorefrontPaused, setItemFulfillment,
   isBusinessSlugAvailable, createBusiness, getMyBusiness, updateBusiness, getMyBusinessProducts, getBusinessStorefront, uploadBusinessAsset,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
   listPaystackBanks, resolveBankAccount,
@@ -2853,6 +2853,11 @@ function AdminScreen() {
   const [btcChecking, setBtcChecking] = useState(false);
   const [btcResult, setBtcResult] = useState(null);
   const [btcError, setBtcError] = useState('');
+  const [solUsername, setSolUsername] = useState('');
+  const [solAsset, setSolAsset] = useState('SOL');
+  const [solChecking, setSolChecking] = useState(false);
+  const [solResult, setSolResult] = useState(null);
+  const [solError, setSolError] = useState('');
 
   const loadStats = async () => {
     try {
@@ -2988,6 +2993,20 @@ function AdminScreen() {
       setBtcError(e.message);
     } finally {
       setBtcChecking(false);
+    }
+  };
+
+  const checkSolBalance = async () => {
+    setSolError('');
+    setSolResult(null);
+    setSolChecking(true);
+    try {
+      const res = await adminCheckSolBalance(solUsername.trim().toLowerCase().replace(/^@/, ''), solAsset);
+      setSolResult(res);
+    } catch (e) {
+      setSolError(e.message);
+    } finally {
+      setSolChecking(false);
     }
   };
 
@@ -3818,6 +3837,39 @@ function AdminScreen() {
           )}
         </div>
       </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-1">Solana Balance Check (read-only)</h2>
+        <p className="text-xs text-neutral-500 mb-3">SOL and USDT-SPL balance lookup. Sweeping isn't built for Solana yet.</p>
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <input
+              value={solUsername}
+              onChange={e => { setSolUsername(e.target.value); setSolResult(null); setSolError(''); }}
+              placeholder="username"
+              className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+            />
+            <select value={solAsset} onChange={e => { setSolAsset(e.target.value); setSolResult(null); }} className="bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2.5 text-sm text-white">
+              <option value="SOL">SOL</option>
+              <option value="USDT">USDT</option>
+            </select>
+          </div>
+          <button onClick={checkSolBalance} disabled={solChecking || !solUsername.trim()} className="w-full bg-neutral-800 rounded-lg py-2.5 text-sm font-semibold disabled:opacity-40">
+            {solChecking ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Check Balance'}
+          </button>
+          {solError && <p className="text-xs text-red-400 mt-2">{solError}</p>}
+          {solResult && (
+            <div className="mt-3 bg-black/40 border border-neutral-800 rounded-lg p-3 space-y-1.5">
+              <div className="text-[11px] text-neutral-500">Address</div>
+              <div className="text-xs font-mono break-all mb-2">{solResult.address}</div>
+              <div className="text-xs">Balance: <span className="font-mono">{solResult.balance} {solResult.asset}</span></div>
+              {solResult.asset === 'USDT' && solResult.has_token_account === false && (
+                <div className="text-[11px] text-neutral-600">No USDT token account exists yet for this address.</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
       </>
       )}
 
@@ -4133,6 +4185,18 @@ function CheckoutPage({ slug }) {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
   const [notice, setNotice] = useState(null);
+  // Real customer details — a merchant genuinely can't fulfil an order
+  // without knowing who it's from and how to reach them.
+  const [custName, setCustName] = useState('');
+  const [custEmail, setCustEmail] = useState('');
+  const [custPhone, setCustPhone] = useState('');
+  const [custAddress, setCustAddress] = useState('');
+  // §31 IDEMPOTENCY — one stable key per checkout session. A double-tap or a
+  // refresh reuses it, so the backend returns the same notice instead of
+  // creating a second one. Regenerated only after a genuine failure.
+  const [idemKey, setIdemKey] = useState(() => `chk_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`);
+  // §21 / §37 — real, specific failure states rather than one generic error.
+  const [failureReason, setFailureReason] = useState('');
 
   // A number typed while on one tab means a different currency on another —
   // reset on switch so it's never misread (e.g. a naira figure silently
@@ -4200,17 +4264,49 @@ function CheckoutPage({ slug }) {
   const networksForSelected = cryptoAsset ? (cryptoBySymbol[cryptoAsset] || []) : [];
   const selectedAddress = link?.crypto_addresses?.[`${cryptoAsset}-${cryptoNetwork}`];
 
+  // Only real business storefront orders need customer details — tips and
+  // plain payment links stay frictionless, exactly as before.
+  const isBusinessOrder = Boolean(link?.business_name);
+  // §7 — only a real delivery fulfilment needs an address. Falls back to
+  // product_type for items created before fulfillment_type existed.
+  const needsAddress = isBusinessOrder && (
+    link?.fulfillment_type === 'delivery' ||
+    (!link?.fulfillment_type || link?.fulfillment_type === 'none') && link?.product_type === 'product'
+  );
+  const custEmailValid = !custEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(custEmail.trim());
+  const custPhoneValid = !custPhone || /^0\d{10}$/.test(custPhone.replace(/\s/g, ''));
+  const customerDetailsComplete = !isBusinessOrder || (
+    custName.trim().length > 0 &&
+    (custEmail.trim() || custPhone.trim()) &&
+    custEmailValid && custPhoneValid &&
+    (!needsAddress || custAddress.trim().length > 0)
+  );
+
   const handleSent = async (method) => {
     setSendError('');
+    setFailureReason('');
     setSending(true);
     try {
       const [res] = await Promise.all([
-        notifyPaymentSent({ slug, method, crypto_asset: method === 'crypto' ? cryptoAsset : undefined, claimed_amount: amountNgn || undefined }),
+        notifyPaymentSent({
+          slug, method,
+          crypto_asset: method === 'crypto' ? cryptoAsset : undefined,
+          claimed_amount: amountNgn || undefined,
+          customer_name: isBusinessOrder ? custName.trim() : undefined,
+          customer_email: isBusinessOrder && custEmail.trim() ? custEmail.trim() : undefined,
+          customer_phone: isBusinessOrder && custPhone.trim() ? custPhone.trim() : undefined,
+          delivery_address: needsAddress && custAddress.trim() ? custAddress.trim() : undefined,
+          idempotency_key: idemKey,
+        }),
         new Promise(r => setTimeout(r, 1100)), // brief, honest loading beat — not simulating a real check
       ]);
       setNotice(res);
     } catch (e) {
       setSendError(e.message);
+      setFailureReason(e.reason || '');
+      // A genuine failure means the attempt never landed — a fresh key lets
+      // the customer retry cleanly without being blocked by the old one.
+      setIdemKey(`chk_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`);
     } finally {
       setSending(false);
     }
@@ -4284,6 +4380,67 @@ function CheckoutPage({ slug }) {
           )}
           {link.description && <p className="text-xs text-neutral-500 mb-5 -mt-3">{link.description}</p>}
 
+          {failureReason === 'business_paused' && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 mb-5">
+              <div className="text-sm font-semibold text-amber-400 mb-1">Store unavailable</div>
+              <p className="text-xs text-neutral-400">
+                {link.business_name} isn't accepting orders right now. Your payment was not taken. Try again later, or contact them directly.
+              </p>
+            </div>
+          )}
+          {failureReason === 'sold_out' && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 mb-5">
+              <div className="text-sm font-semibold text-red-400 mb-1">Just sold out</div>
+              <p className="text-xs text-neutral-400">
+                This item sold out before your order went through. Your payment was not taken.
+              </p>
+            </div>
+          )}
+
+          {isBusinessOrder && (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-5">
+              <div className="text-xs font-semibold mb-1">Your details</div>
+              <p className="text-[11px] text-neutral-500 mb-3">
+                So {link.business_name} can confirm your order and reach you about it.
+              </p>
+              <div className="space-y-2.5">
+                <input
+                  value={custName}
+                  onChange={e => setCustName(e.target.value)}
+                  placeholder="Full name"
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-violet-500 placeholder-neutral-600"
+                />
+                <input
+                  type="email"
+                  inputMode="email"
+                  value={custEmail}
+                  onChange={e => setCustEmail(e.target.value)}
+                  placeholder="Email"
+                  className={`w-full bg-neutral-900 border rounded-xl px-3.5 py-2.5 text-sm outline-none placeholder-neutral-600 ${custEmail && !custEmailValid ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`}
+                />
+                <input
+                  inputMode="numeric"
+                  value={custPhone}
+                  onChange={e => setCustPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  placeholder="Phone number"
+                  className={`w-full bg-neutral-900 border rounded-xl px-3.5 py-2.5 text-sm outline-none placeholder-neutral-600 ${custPhone && !custPhoneValid ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`}
+                />
+                {needsAddress && (
+                  <textarea
+                    value={custAddress}
+                    onChange={e => setCustAddress(e.target.value)}
+                    placeholder="Delivery address"
+                    rows={2}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-violet-500 placeholder-neutral-600 resize-none"
+                  />
+                )}
+              </div>
+              {!custEmail.trim() && !custPhone.trim() && (
+                <p className="text-[11px] text-neutral-600 mt-2.5">Add an email or phone number so they can reach you.</p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-3 gap-2 mb-5">
             <button onClick={() => setPayTab('naira')} className={`rounded-xl py-2.5 text-xs font-semibold transition ${payTab === 'naira' ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400'}`}>Pay Naira</button>
             <button onClick={() => setPayTab('card')} className={`rounded-xl py-2.5 text-xs font-semibold transition ${payTab === 'card' ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400'}`}>Pay Card</button>
@@ -4313,7 +4470,7 @@ function CheckoutPage({ slug }) {
                 <Loader2 className="w-3 h-3" style={{ animation: 'none' }} /> Expires in {fmtCountdown(secondsLeft)}
               </div>
               {sendError && <p className="text-sm text-red-400 mb-3 text-center">{sendError}</p>}
-              <PrimaryButton onClick={() => handleSent('bank')} disabled={sending || (link.link_type === 'flexible' && amountNgn <= 0)}>
+              <PrimaryButton onClick={() => handleSent('bank')} disabled={sending || !customerDetailsComplete || (link.link_type === 'flexible' && amountNgn <= 0)}>
                 {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "I've sent the payment"}
               </PrimaryButton>
             </div>
@@ -4411,7 +4568,7 @@ function CheckoutPage({ slug }) {
                   </div>
 
                   {sendError && <p className="text-sm text-red-400 mb-3 text-center">{sendError}</p>}
-                  <PrimaryButton onClick={() => handleSent('crypto')} disabled={sending}>
+                  <PrimaryButton onClick={() => handleSent('crypto')} disabled={sending || !customerDetailsComplete}>
                     {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "I've sent the payment"}
                   </PrimaryButton>
                 </>
@@ -6102,6 +6259,172 @@ function BusinessMarketingScreen() {
   );
 }
 
+// The customer's real order page — reached by a random access token, so it
+// works for guests with no Tranxact account, and can't be found by guessing
+// an order number. Keeps the customer inside the business's context, never
+// dumping them onto the Tranxact homepage.
+const TRACKING_STEPS = [
+  { key: 'paid', label: 'Paid', note: 'Payment confirmed' },
+  { key: 'processing', label: 'Processing', note: 'Being prepared' },
+  { key: 'ready', label: 'Ready', note: 'Ready for you' },
+  { key: 'completed', label: 'Completed', note: 'All done' },
+];
+
+function OrderTrackingScreen({ token }) {
+  const [order, setOrder] = useState(null); // null = loading
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    getStorefrontOrderByToken(token)
+      .then(setOrder)
+      .catch(e => setError(e.message));
+  }, [token]);
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-6 text-center">
+        <h1 className="text-lg font-bold mb-2">Order not found</h1>
+        <p className="text-sm text-neutral-500 max-w-xs">This order link doesn't work. Double-check the link, or contact the business you ordered from.</p>
+      </div>
+    );
+  }
+  if (!order) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-neutral-600" />
+      </div>
+    );
+  }
+
+  const isCancelled = order.status === 'cancelled' || order.status === 'refunded';
+  const currentStepIndex = TRACKING_STEPS.findIndex(s => s.key === order.status);
+  const placed = order.created_at
+    ? new Date(order.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '';
+  const waLink = order.business_contact_phone
+    ? `https://wa.me/${String(order.business_contact_phone).replace(/\D/g, '').replace(/^0/, '234')}?text=${encodeURIComponent(`Hi, about my order ${order.order_number}`)}`
+    : null;
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <div className="max-w-md mx-auto px-5 py-8">
+        <div className="flex items-center gap-3 mb-8">
+          {order.business_logo_url ? (
+            <img src={order.business_logo_url} alt="" className="w-10 h-10 rounded-xl object-cover" />
+          ) : (
+            <div className="w-10 h-10 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center text-sm font-bold">
+              {(order.business_name || '?').charAt(0).toUpperCase()}
+            </div>
+          )}
+          <div>
+            <div className="text-sm font-bold">{order.business_name}</div>
+            <div className="text-xs text-neutral-500 font-mono">{order.order_number}</div>
+          </div>
+        </div>
+
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 mb-5">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <div className="text-sm font-semibold">{order.item_title}</div>
+              {order.quantity > 1 && <div className="text-xs text-neutral-500 mt-0.5">Qty {order.quantity}</div>}
+            </div>
+            {order.item_amount != null && (
+              <div className="text-sm font-mono flex-shrink-0 ml-3">{fmtNaira(Number(order.item_amount))}</div>
+            )}
+          </div>
+          <div className="border-t border-neutral-800 pt-4 space-y-2">
+            <div className="flex justify-between text-xs"><span className="text-neutral-500">Payment</span><span className="text-emerald-400">Paid</span></div>
+            {placed && <div className="flex justify-between text-xs"><span className="text-neutral-500">Placed</span><span>{placed}</span></div>}
+            {order.customer_name && (
+              <div className="flex justify-between text-xs"><span className="text-neutral-500">Ordered by</span><span>{order.customer_name}</span></div>
+            )}
+            <div className="flex justify-between text-xs"><span className="text-neutral-500">Reference</span><span className="font-mono text-neutral-400">{order.order_number}</span></div>
+          </div>
+        </div>
+
+        {(order.fulfillment_type && order.fulfillment_type !== 'none') && (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 mb-5">
+            <div className="text-xs text-neutral-500 mb-2">
+              {order.fulfillment_type === 'delivery' ? 'Delivery' :
+               order.fulfillment_type === 'pickup' ? 'Pickup' :
+               order.fulfillment_type === 'digital' ? 'Digital delivery' :
+               order.fulfillment_type === 'event' ? 'Event' : 'Service'}
+            </div>
+            {order.delivery_address && (
+              <div className="text-sm mb-2 leading-relaxed">{order.delivery_address}</div>
+            )}
+            {order.fulfillment_instructions && (
+              <p className="text-xs text-neutral-400 leading-relaxed">{order.fulfillment_instructions}</p>
+            )}
+            {!order.delivery_address && !order.fulfillment_instructions && (
+              <p className="text-xs text-neutral-500">
+                {order.business_name} will be in touch about how to receive this.
+              </p>
+            )}
+          </div>
+        )}
+
+        {isCancelled ? (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-5 mb-5">
+            <div className="text-sm font-semibold text-red-400 mb-1">
+              {order.status === 'refunded' ? 'Order refunded' : 'Order cancelled'}
+            </div>
+            <div className="text-xs text-neutral-400">
+              {order.status === 'refunded'
+                ? `${order.business_name} has marked this order as refunded.`
+                : `${order.business_name} has cancelled this order.`}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 mb-5">
+            <div className="text-xs text-neutral-500 mb-4">Order status</div>
+            <div className="space-y-4">
+              {TRACKING_STEPS.map((step, i) => {
+                const done = i <= currentStepIndex;
+                const isCurrent = i === currentStepIndex;
+                return (
+                  <div key={step.key} className="flex items-start gap-3">
+                    <div className={`w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5 ${done ? 'bg-emerald-500' : 'bg-neutral-800 border border-neutral-700'}`}>
+                      {done && <Check className="w-3 h-3 text-black" />}
+                    </div>
+                    <div>
+                      <div className={`text-sm ${done ? 'font-semibold' : 'text-neutral-600'}`}>{step.label}</div>
+                      {isCurrent && <div className="text-xs text-neutral-500 mt-0.5">{step.note}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2 mb-8">
+          {waLink && (
+            <a href={waLink} target="_blank" rel="noopener noreferrer" className="block w-full bg-white text-black rounded-xl py-3 text-sm font-semibold text-center">
+              Contact {order.business_name}
+            </a>
+          )}
+          {order.business_contact_email && (
+            <a href={`mailto:${order.business_contact_email}?subject=${encodeURIComponent(`Order ${order.order_number}`)}`} className="block w-full bg-neutral-900 border border-neutral-800 rounded-xl py-3 text-sm text-center text-neutral-300">
+              Email {order.business_name}
+            </a>
+          )}
+          {order.business_slug && (
+            <a href={`https://business.tranxact.co/${order.business_slug}`} className="block w-full text-center text-sm text-neutral-500 py-2">
+              Back to store
+            </a>
+          )}
+        </div>
+
+        <p className="text-[11px] text-neutral-600 text-center leading-relaxed">
+          Your order is fulfilled by {order.business_name}.<br />
+          Powered by Tranxact
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function BusinessStorefrontScreen({ slug }) {
   const [business, setBusiness] = useState(null); // null = loading, false = not found
   const [error, setError] = useState('');
@@ -6259,6 +6582,16 @@ function BusinessStorefrontScreen({ slug }) {
       {business.cover_image_url && (
         <div className="w-full h-40 overflow-hidden"><img src={business.cover_image_url} alt="" className="w-full h-full object-cover" /></div>
       )}
+      {business.is_paused && (
+        <div className="max-w-lg mx-auto px-5 pt-5">
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-center">
+            <div className="text-sm font-semibold text-amber-400 mb-1">This store is currently unavailable</div>
+            <p className="text-xs text-neutral-400">
+              {business.name} isn't taking new orders right now. If you already placed an order, it's unaffected.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="max-w-lg mx-auto px-5 py-10">
         <div className="flex flex-col items-center text-center mb-10">
           {business.logo_url ? (
@@ -6279,7 +6612,7 @@ function BusinessStorefrontScreen({ slug }) {
           <div className="space-y-3 pb-10">
             {business.products.map((p) => {
               const soldOut = p.inventory !== null && p.inventory !== undefined && p.inventory <= 0;
-              const canQuickAdd = !soldOut && p.product_type !== 'custom' && p.link_type === 'fixed';
+              const canQuickAdd = !soldOut && !business.is_paused && p.product_type !== 'custom' && p.link_type === 'fixed';
               return (
                 <div
                   key={p.slug}
@@ -6804,9 +7137,32 @@ function AddEventForm({ business, onBack, onAdded }) {
 // Real orders, created by admin-settle every time a storefront item actually
 // sells, cart or single-item. Nothing here is invented — if this is empty,
 // nothing has genuinely sold yet.
+// Real fulfillment sequence — matches the server-side enforcement exactly,
+// so the UI can never offer a move the backend would reject.
+const ORDER_NEXT_STATUS = {
+  paid: [{ value: 'processing', label: 'Start processing' }, { value: 'cancelled', label: 'Cancel' }],
+  processing: [{ value: 'ready', label: 'Mark ready' }, { value: 'cancelled', label: 'Cancel' }],
+  ready: [{ value: 'completed', label: 'Mark completed' }, { value: 'cancelled', label: 'Cancel' }],
+  completed: [{ value: 'refunded', label: 'Mark refunded' }],
+  cancelled: [],
+  refunded: [],
+};
+
+const ORDER_STATUS_STYLE = {
+  paid: 'bg-emerald-500/15 text-emerald-400',
+  processing: 'bg-amber-500/15 text-amber-400',
+  ready: 'bg-violet-500/15 text-violet-400',
+  completed: 'bg-neutral-700/40 text-neutral-300',
+  cancelled: 'bg-red-500/15 text-red-400',
+  refunded: 'bg-red-500/15 text-red-400',
+};
+
 function DashboardOrders({ userId }) {
   const [business, setBusiness] = useState(null); // null = loading, false = none yet
   const [orders, setOrders] = useState([]);
+  const [updatingId, setUpdatingId] = useState(null);
+  const [error, setError] = useState('');
+  const [copiedId, setCopiedId] = useState(null);
 
   useEffect(() => {
     getMyBusiness(userId).then(async ({ data }) => {
@@ -6817,6 +7173,26 @@ function DashboardOrders({ userId }) {
       }
     });
   }, [userId]);
+
+  const changeStatus = async (orderId, newStatus) => {
+    setError('');
+    setUpdatingId(orderId);
+    try {
+      await updateStorefrontOrderStatus(orderId, newStatus);
+      setOrders(prev => prev.map(o => (o.id === orderId ? { ...o, status: newStatus } : o)));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const copyTrackingLink = (o) => {
+    const url = `https://business.tranxact.co/order/${o.access_token}`;
+    navigator.clipboard?.writeText(url);
+    setCopiedId(o.id);
+    setTimeout(() => setCopiedId(null), 1800);
+  };
 
   if (business === null) {
     return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>;
@@ -6833,23 +7209,50 @@ function DashboardOrders({ userId }) {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-6">Orders</h1>
+      {error && <p className="text-sm text-red-400 mb-4 max-w-md">{error}</p>}
       {orders.length === 0 ? (
         <p className="text-sm text-neutral-600 py-6 max-w-md">No orders yet. They'll show up here the moment something real sells.</p>
       ) : (
         <div className="space-y-2 max-w-md">
-          {orders.map(o => (
-            <div key={o.id} className="bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-mono text-neutral-500">{o.order_number}</span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 uppercase">{o.status}</span>
+          {orders.map(o => {
+            const nextOptions = ORDER_NEXT_STATUS[o.status] || [];
+            return (
+              <div key={o.id} className="bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-mono text-neutral-500">{o.order_number}</span>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase ${ORDER_STATUS_STYLE[o.status] || 'bg-neutral-700/40 text-neutral-300'}`}>{o.status}</span>
+                </div>
+                <div className="text-sm font-medium">{o.payment_links?.title || 'Item'}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</div>
+                <div className="text-xs text-neutral-500 mt-0.5">
+                  {fmtNaira(Number(o.payment_links?.amount || 0) * o.quantity)}
+                  {o.customer_name && <span> · {o.customer_name}</span>}
+                </div>
+                {o.customer_contact && (
+                  <div className="text-xs text-neutral-600 mt-0.5">{o.customer_contact}</div>
+                )}
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  {nextOptions.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => changeStatus(o.id, opt.value)}
+                      disabled={updatingId === o.id}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40 ${opt.value === 'cancelled' || opt.value === 'refunded' ? 'bg-red-500/10 border border-red-500/30 text-red-400' : 'bg-white text-black'}`}
+                    >
+                      {updatingId === o.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : opt.label}
+                    </button>
+                  ))}
+                  {o.access_token && (
+                    <button
+                      onClick={() => copyTrackingLink(o)}
+                      className="rounded-lg px-3 py-1.5 text-xs bg-neutral-900 border border-neutral-800 text-neutral-400"
+                    >
+                      {copiedId === o.id ? 'Copied' : 'Copy tracking link'}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="text-sm font-medium">{o.payment_links?.title || 'Item'}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</div>
-              <div className="text-xs text-neutral-500 mt-0.5">
-                {fmtNaira(Number(o.payment_links?.amount || 0) * o.quantity)}
-                {o.customer_name && <span> · {o.customer_name}</span>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -7159,6 +7562,8 @@ function DashboardStorefront({ userId, setTab }) {
   const [actionLoading, setActionLoading] = useState(null);
   const [actionError, setActionError] = useState('');
   const [confirmDeleteFor, setConfirmDeleteFor] = useState(null);
+  const [pausing, setPausing] = useState(false);
+  const [pauseError, setPauseError] = useState('');
 
   const loadBusiness = async () => {
     const { data: biz } = await getMyBusiness(userId);
@@ -7253,15 +7658,43 @@ function DashboardStorefront({ userId, setTab }) {
     <div>
       <div className="flex items-center gap-2 mb-1">
         <h1 className="text-2xl font-bold">Storefront</h1>
-        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${business.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-400'}`}>
-          {business.status === 'active' ? 'Active' : 'Paused'}
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${business.is_paused ? 'bg-amber-500/15 text-amber-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
+          {business.is_paused ? 'Paused' : 'Active'}
         </span>
       </div>
       <p className="text-sm text-neutral-500 mb-4">{business.name}. Sell products, services, or events with a shareable page.</p>
-      <a href={storefrontUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs text-violet-400 mb-6">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-        Preview your page
-      </a>
+      <div className="flex items-center gap-4 mb-6">
+        <a href={storefrontUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs text-violet-400">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          Preview your page
+        </a>
+        <button
+          onClick={async () => {
+            setPauseError('');
+            setPausing(true);
+            try {
+              const res = await setStorefrontPaused(!business.is_paused);
+              setBusiness({ ...business, is_paused: res.is_paused });
+            } catch (e) {
+              setPauseError(e.message);
+            } finally {
+              setPausing(false);
+            }
+          }}
+          disabled={pausing}
+          className="text-xs text-neutral-400 hover:text-white transition disabled:opacity-40"
+        >
+          {pausing ? 'Saving…' : business.is_paused ? 'Resume store' : 'Pause store'}
+        </button>
+      </div>
+      {pauseError && <p className="text-xs text-red-400 mb-4">{pauseError}</p>}
+      {business.is_paused && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-6">
+          <p className="text-xs text-amber-300">
+            Your store is paused. Customers can't place new orders, but existing orders are unaffected and still visible to them.
+          </p>
+        </div>
+      )}
 
       <StoreSetupChecklist
         business={business}
@@ -7409,6 +7842,10 @@ function EditItemScreen({ item, onBack, onSaved }) {
   const [imageUploading, setImageUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // §7 — how this item is actually fulfilled. Drives whether checkout asks
+  // the customer for a delivery address at all.
+  const [fulfillmentType, setFulfillmentType] = useState(item.fulfillment_type || 'none');
+  const [fulfillmentInstructions, setFulfillmentInstructions] = useState(item.fulfillment_instructions || '');
 
   const handleImageSelect = async (e) => {
     const file = e.target.files?.[0];
@@ -7434,6 +7871,11 @@ function EditItemScreen({ item, onBack, onSaved }) {
         image_url: imageUrl || null,
         inventory: item.product_type === 'product' ? (inventory !== '' ? Number(inventory) : null) : undefined,
       });
+      // Fulfillment lives behind its own ownership-checked function, so it's
+      // a separate call rather than folded into the generic item update.
+      if (item.slug) {
+        await setItemFulfillment(item.slug, fulfillmentType, fulfillmentInstructions);
+      }
       onSaved();
     } catch (e) {
       setError(e.message);
@@ -7460,6 +7902,32 @@ function EditItemScreen({ item, onBack, onSaved }) {
         </label>
         <Field label="Name" value={title} onChange={(e) => setTitle(e.target.value)} />
         <Field label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
+        <label className="block">
+          <span className="text-sm text-neutral-400 mb-2 block">How do you fulfil this?</span>
+          <select
+            value={fulfillmentType}
+            onChange={(e) => setFulfillmentType(e.target.value)}
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-white"
+          >
+            <option value="none">Not specified</option>
+            <option value="delivery">Delivery — I'll deliver to the customer</option>
+            <option value="pickup">Pickup — customer collects</option>
+            <option value="digital">Digital — sent electronically</option>
+            <option value="service">Service — performed for the customer</option>
+            <option value="event">Event — ticket or entry</option>
+          </select>
+          <p className="text-[11px] text-neutral-600 mt-1.5">
+            {fulfillmentType === 'delivery'
+              ? 'Checkout will ask the customer for a delivery address.'
+              : 'Checkout will not ask for a delivery address.'}
+          </p>
+        </label>
+        <Field
+          label="Fulfilment note (optional)"
+          value={fulfillmentInstructions}
+          onChange={(e) => setFulfillmentInstructions(e.target.value)}
+          placeholder="e.g. Collect at 12 Allen Ave, Mon–Fri 9–5"
+        />
         {item.link_type === 'fixed' && item.product_type !== 'custom' && (
           <Field label="Amount (NGN)" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
         )}
@@ -7497,8 +7965,13 @@ export default function TranxactApp() {
   if (hostname.startsWith('pay.')) return <WebDashboardApp />;
 
   if (hostname.startsWith('business.')) {
-    const slug = pathname.replace(/^\//, '').split('/')[0];
-    return <BusinessStorefrontScreen slug={slug} />;
+    const parts = pathname.replace(/^\//, '').split('/');
+    // A real customer order tracking page, reached by a random access token
+    // — never the sequential order number, which would be trivially guessable.
+    if (parts[0] === 'order' && parts[1]) {
+      return <OrderTrackingScreen token={parts[1]} />;
+    }
+    return <BusinessStorefrontScreen slug={parts[0]} />;
   }
 
   return <MobileAppRoot />;
