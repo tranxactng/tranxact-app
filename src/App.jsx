@@ -4941,7 +4941,7 @@ function DashboardShell({ tab, setTab, onLogout, children }) {
   const navItems = [
     { key: 'overview', label: 'Overview', icon: LineChart },
     { key: 'links', label: 'Payment Links', icon: Link2 },
-    { key: 'storefront', label: 'Storefront', icon: ShoppingBag },
+    { key: 'storefront', label: 'Business', icon: ShoppingBag },
     { key: 'orders', label: 'Orders', icon: FileText },
     { key: 'customers', label: 'Customers', icon: UserCircle },
     { key: 'analytics', label: 'Analytics', icon: BarChart3 },
@@ -5367,7 +5367,7 @@ function DashboardAnalytics({ analytics, userId }) {
       )}
       {storeAnalytics && (
         <div className="mt-8">
-          <h2 className="text-sm font-semibold mb-4">Storefront</h2>
+          <h2 className="text-sm font-semibold mb-4">Business</h2>
           <div className="grid grid-cols-2 gap-3 mb-4">
             <StatCard label="Store visits" value={storeAnalytics.visits} />
             <StatCard label="Product views" value={storeAnalytics.product_views} />
@@ -5375,7 +5375,7 @@ function DashboardAnalytics({ analytics, userId }) {
             <StatCard label="Conversion rate" value={storeAnalytics.conversion_rate !== null ? `${storeAnalytics.conversion_rate}%` : '—'} sub={storeAnalytics.visits === 0 ? 'No visits tracked yet' : undefined} />
           </div>
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-4">
-            <div className="text-xs text-neutral-500 mb-2">Storefront revenue</div>
+            <div className="text-xs text-neutral-500 mb-2">Business revenue</div>
             <div className="font-mono text-2xl font-bold">{fmtNaira(storeAnalytics.revenue)}</div>
             <div className="text-xs text-neutral-600 mt-1">{storeAnalytics.orders} order{storeAnalytics.orders === 1 ? '' : 's'}</div>
           </div>
@@ -6123,7 +6123,7 @@ function BusinessMarketingScreen() {
             <div className="text-[10px] text-neutral-600 text-center border-t border-neutral-900 pt-3">Demonstration data</div>
           </div>
           <div className="flex flex-wrap content-start gap-2">
-            {['Storefront', 'Products', 'Services', 'Events', 'Orders', 'Customers', 'Payments', 'Payment Links', 'Analytics', 'Transactions', 'Withdraw'].map(item => (
+            {['Business', 'Products', 'Services', 'Events', 'Orders', 'Customers', 'Payments', 'Payment Links', 'Analytics', 'Transactions', 'Withdraw'].map(item => (
               <span key={item} className="text-xs bg-neutral-950 border border-neutral-800 rounded-full px-3 py-1.5 text-neutral-400">{item}</span>
             ))}
           </div>
@@ -7201,7 +7201,7 @@ function DashboardOrders({ userId }) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-1">Orders</h1>
-        <p className="text-sm text-neutral-500">Set up your Storefront first, then real orders show up here as they come in.</p>
+        <p className="text-sm text-neutral-500">Set up your Business first, then real orders show up here as they come in.</p>
       </div>
     );
   }
@@ -7283,7 +7283,7 @@ function DashboardCustomers({ userId }) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-1">Customers</h1>
-        <p className="text-sm text-neutral-500">Set up your Storefront first, then real customers show up here as they buy.</p>
+        <p className="text-sm text-neutral-500">Set up your Business first, then real customers show up here as they buy.</p>
       </div>
     );
   }
@@ -7405,7 +7405,7 @@ function DashboardSettings({ userId }) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-1">Settings</h1>
-        <p className="text-sm text-neutral-500">Set up your Storefront first, then your business details show up here to edit.</p>
+        <p className="text-sm text-neutral-500">Set up your Business first, then your business details show up here to edit.</p>
       </div>
     );
   }
@@ -7506,7 +7506,11 @@ function DashboardSettings({ userId }) {
 // linger and clutter the page for an established store.
 function StoreSetupChecklist({ business, products, userId, onGoSettings, onGoAdd }) {
   const [fullName, setFullName] = useState(undefined); // undefined = loading
-  const [collapsed, setCollapsed] = useState(false);
+  // Dismissal has to survive a reload — keeping it in memory alone meant a
+  // finished checklist reappeared on every single page load.
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(`tx_checklist_dismissed_${userId}`) === '1'; } catch { return false; }
+  });
 
   useEffect(() => {
     supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle()
@@ -7514,9 +7518,12 @@ function StoreSetupChecklist({ business, products, userId, onGoSettings, onGoAdd
   }, [userId]);
 
   if (fullName === undefined) return null;
+  if (dismissed) return null;
 
   const items = [
-    { label: 'Add store information', done: Boolean(business.description && business.category), onClick: onGoSettings },
+    // Category is optional in practice — a store with a real description is
+    // set up. Requiring both meant the checklist could never complete.
+    { label: 'Add store information', done: Boolean(business.description), onClick: onGoSettings },
     { label: 'Add your first item', done: products.length > 0, onClick: onGoAdd },
     { label: 'Add your name', done: Boolean(fullName), onClick: () => window.open('https://app.tranxact.co', '_blank') },
     { label: 'Customize your page', done: Boolean(business.logo_url || business.cover_image_url), onClick: onGoSettings },
@@ -7524,7 +7531,25 @@ function StoreSetupChecklist({ business, products, userId, onGoSettings, onGoAdd
   const doneCount = items.filter(i => i.done).length;
   const allDone = doneCount === items.length;
 
-  if (allDone && collapsed) return null;
+  const dismiss = () => {
+    try { localStorage.setItem(`tx_checklist_dismissed_${userId}`, '1'); } catch { /* private mode, no-op */ }
+    setDismissed(true);
+  };
+
+  // Once genuinely finished, it disappears for good rather than nagging.
+  if (allDone) {
+    return (
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6 max-w-md flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
+            <Check className="w-3 h-3 text-black" />
+          </div>
+          <span className="text-sm">Store setup complete</span>
+        </div>
+        <button onClick={dismiss} className="text-xs text-neutral-500 hover:text-white transition">Dismiss</button>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6 max-w-md">
@@ -7544,9 +7569,6 @@ function StoreSetupChecklist({ business, products, userId, onGoSettings, onGoAdd
           </button>
         ))}
       </div>
-      {allDone && (
-        <button onClick={() => setCollapsed(true)} className="text-xs text-violet-400 mt-3">Dismiss</button>
-      )}
     </div>
   );
 }
@@ -7657,7 +7679,7 @@ function DashboardStorefront({ userId, setTab }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-1">
-        <h1 className="text-2xl font-bold">Storefront</h1>
+        <h1 className="text-2xl font-bold">Business</h1>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${business.is_paused ? 'bg-amber-500/15 text-amber-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
           {business.is_paused ? 'Paused' : 'Active'}
         </span>
