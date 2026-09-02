@@ -4197,6 +4197,10 @@ function CheckoutPage({ slug }) {
   const [idemKey, setIdemKey] = useState(() => `chk_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`);
   // §21 / §37 — real, specific failure states rather than one generic error.
   const [failureReason, setFailureReason] = useState('');
+  // Business orders run as two real steps: details first, then payment.
+  // Cramming both onto one screen made a long page and buried the payment
+  // instructions below a form the customer hadn't filled yet.
+  const [checkoutStep, setCheckoutStep] = useState('details');
 
   // A number typed while on one tab means a different currency on another —
   // reset on switch so it's never misread (e.g. a naira figure silently
@@ -4397,48 +4401,70 @@ function CheckoutPage({ slug }) {
             </div>
           )}
 
-          {isBusinessOrder && (
-            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-5">
-              <div className="text-xs font-semibold mb-1">Your details</div>
-              <p className="text-[11px] text-neutral-500 mb-3">
-                So {link.business_name} can confirm your order and reach you about it.
-              </p>
-              <div className="space-y-2.5">
-                <input
-                  value={custName}
-                  onChange={e => setCustName(e.target.value)}
-                  placeholder="Full name"
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-violet-500 placeholder-neutral-600"
-                />
-                <input
-                  type="email"
-                  inputMode="email"
-                  value={custEmail}
-                  onChange={e => setCustEmail(e.target.value)}
-                  placeholder="Email"
-                  className={`w-full bg-neutral-900 border rounded-xl px-3.5 py-2.5 text-sm outline-none placeholder-neutral-600 ${custEmail && !custEmailValid ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`}
-                />
-                <input
-                  inputMode="numeric"
-                  value={custPhone}
-                  onChange={e => setCustPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
-                  placeholder="Phone number"
-                  className={`w-full bg-neutral-900 border rounded-xl px-3.5 py-2.5 text-sm outline-none placeholder-neutral-600 ${custPhone && !custPhoneValid ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`}
-                />
-                {needsAddress && (
-                  <textarea
-                    value={custAddress}
-                    onChange={e => setCustAddress(e.target.value)}
-                    placeholder="Delivery address"
-                    rows={2}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-violet-500 placeholder-neutral-600 resize-none"
+          {isBusinessOrder && checkoutStep === 'details' && (
+            <div>
+              <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-4">
+                <div className="text-xs font-semibold mb-1">Your details</div>
+                <p className="text-[11px] text-neutral-500 mb-3">
+                  So {link.business_name} can confirm your order and reach you about it.
+                </p>
+                <div className="space-y-2.5">
+                  <input
+                    value={custName}
+                    onChange={e => setCustName(e.target.value)}
+                    placeholder="Full name"
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-violet-500 placeholder-neutral-600"
                   />
+                  <input
+                    type="email"
+                    inputMode="email"
+                    value={custEmail}
+                    onChange={e => setCustEmail(e.target.value)}
+                    placeholder="Email"
+                    className={`w-full bg-neutral-900 border rounded-xl px-3.5 py-2.5 text-sm outline-none placeholder-neutral-600 ${custEmail && !custEmailValid ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`}
+                  />
+                  <input
+                    inputMode="numeric"
+                    value={custPhone}
+                    onChange={e => setCustPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                    placeholder="Phone number"
+                    className={`w-full bg-neutral-900 border rounded-xl px-3.5 py-2.5 text-sm outline-none placeholder-neutral-600 ${custPhone && !custPhoneValid ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`}
+                  />
+                  {needsAddress && (
+                    <textarea
+                      value={custAddress}
+                      onChange={e => setCustAddress(e.target.value)}
+                      placeholder="Delivery address"
+                      rows={2}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-violet-500 placeholder-neutral-600 resize-none"
+                    />
+                  )}
+                </div>
+                {custEmail.trim() && (
+                  <p className="text-[11px] text-neutral-600 mt-2.5">We'll email your receipt and order details here.</p>
+                )}
+                {!custEmail.trim() && !custPhone.trim() && (
+                  <p className="text-[11px] text-neutral-600 mt-2.5">Add an email or phone number so they can reach you.</p>
                 )}
               </div>
-              {!custEmail.trim() && !custPhone.trim() && (
-                <p className="text-[11px] text-neutral-600 mt-2.5">Add an email or phone number so they can reach you.</p>
-              )}
+              <button
+                onClick={() => setCheckoutStep('payment')}
+                disabled={!customerDetailsComplete}
+                className="w-full bg-white text-black rounded-xl py-3 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Continue to payment
+              </button>
             </div>
+          )}
+
+          {(!isBusinessOrder || checkoutStep === 'payment') && (<>
+          {isBusinessOrder && (
+            <button
+              onClick={() => setCheckoutStep('details')}
+              className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-white transition mb-4"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" /> Back to your details
+            </button>
           )}
 
           <div className="grid grid-cols-3 gap-2 mb-5">
@@ -4575,17 +4601,40 @@ function CheckoutPage({ slug }) {
               )}
             </div>
           )}
+          </>)}
         </div>
       )}
 
       {notice && link.business_name && (
         <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 text-center">
-          <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-5">
-            <Check className="w-6 h-6 text-emerald-400" />
+          <div className="w-14 h-14 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto mb-5">
+            <Loader2 className="w-6 h-6 text-amber-400" />
           </div>
-          <h2 className="text-lg font-bold mb-1">Order placed</h2>
-          <p className="text-sm text-neutral-500 mb-4">{link.title} · in progress with {link.business_name}</p>
-          <p className="text-xs text-neutral-600 font-mono mb-6">Ref: {notice.reference}</p>
+          <h2 className="text-lg font-bold mb-1">Confirming your payment</h2>
+          <p className="text-sm text-neutral-500 mb-4">
+            {link.title} · {link.business_name}
+          </p>
+          <p className="text-xs text-neutral-600 font-mono mb-5">Ref: {notice.reference}</p>
+
+          {custEmail.trim() ? (
+            <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-4 text-left mb-4">
+              <div className="flex items-start gap-2.5">
+                <Mail className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-semibold text-emerald-400 mb-1">We'll email you</div>
+                  <p className="text-[11px] text-neutral-400 leading-relaxed">
+                    Once your payment is confirmed, we'll send your order number, receipt, and a link to track it to <span className="text-neutral-300">{custEmail.trim()}</span>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 text-left mb-4">
+              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                Your payment is being confirmed. {link.business_name} will be in touch about your order.
+              </p>
+            </div>
+          )}
 
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 text-left mb-4">
             <div className="text-xs text-neutral-500 mb-2.5">Contact {link.business_name}</div>
@@ -5922,7 +5971,7 @@ function BusinessMarketingScreen() {
     { href: '#product', label: 'Product' },
     { href: '#how-it-works', label: 'How it works' },
     { href: '#payments', label: 'Payments' },
-    { href: '#storefront', label: 'Storefront' },
+    { href: '#storefront', label: 'Business Page' },
     { href: '#events', label: 'Events' },
   ];
 
@@ -6229,7 +6278,7 @@ function BusinessMarketingScreen() {
             <div>
               <div className="text-xs font-semibold text-neutral-500 mb-3">Product</div>
               <div className="flex flex-col gap-2 text-xs text-neutral-500">
-                <a href="#storefront" className="hover:text-white transition">Storefront</a>
+                <a href="#storefront" className="hover:text-white transition">Business Page</a>
                 <a href="#payments" className="hover:text-white transition">Payments</a>
                 <a href="#payments" className="hover:text-white transition">Payment Links</a>
                 <a href="#events" className="hover:text-white transition">Events</a>
