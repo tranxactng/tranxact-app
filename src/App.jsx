@@ -190,6 +190,66 @@ function CoinIcon({ symbol, size = 36 }) {
   );
 }
 
+// A success bottom sheet that slides up over whatever the user was looking
+// at, so the summary behind it stays visible and the result feels like it
+// happened *to* that screen rather than replacing it.
+function SuccessSheet({ open, title = 'Success!', subtitle, amount, detail, onDone, secondaryLabel, onSecondary }) {
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    if (!open) { setShown(false); return; }
+    // One frame before animating in, so the transition actually runs rather
+    // than the sheet just appearing already-open.
+    const id = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center">
+      <div
+        className={`absolute inset-0 bg-black transition-opacity duration-300 ${shown ? 'opacity-60' : 'opacity-0'}`}
+        onClick={onDone}
+      />
+      <div
+        className={`relative w-full max-w-md bg-neutral-950 border-t border-neutral-800 rounded-t-3xl px-6 pt-8 pb-8 transition-transform duration-300 ease-out ${shown ? 'translate-y-0' : 'translate-y-full'}`}
+        style={{ paddingBottom: 'max(2rem, env(safe-area-inset-bottom))' }}
+      >
+        <div className="flex flex-col items-center text-center">
+          <div className="w-16 h-16 rounded-full bg-emerald-500 flex items-center justify-center mb-5">
+            <Check className="w-8 h-8 text-black" strokeWidth={3} />
+          </div>
+          <h2 className="text-2xl font-bold mb-1.5">{title}</h2>
+          {subtitle && <p className="text-sm text-neutral-500 mb-5">{subtitle}</p>}
+
+          {amount && (
+            <div className="font-mono text-3xl font-bold mb-1">{amount}</div>
+          )}
+          {detail && <div className="text-sm text-neutral-500 mb-6">{detail}</div>}
+
+          <div className="w-full space-y-3 mt-2">
+            <button
+              onClick={onDone}
+              className="w-full bg-white text-black rounded-2xl py-3.5 text-sm font-semibold active:scale-[0.98] transition"
+            >
+              Done
+            </button>
+            {secondaryLabel && onSecondary && (
+              <button
+                onClick={onSecondary}
+                className="w-full text-sm text-neutral-400 py-2 hover:text-white transition"
+              >
+                {secondaryLabel}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PrimaryButton({ children, onClick, className = '', type = 'button', disabled = false }) {
   return (
     <button
@@ -1794,18 +1854,41 @@ function AirtimeScreen({ onBack, onDone, hasPin }) {
 
   if (step === 'result' && result) {
     const isSettled = result.status === 'settled';
+
+    // Only a genuine success gets the celebratory sheet. "Still processing"
+    // isn't a success yet, so it stays a plain, honest screen.
+    if (isSettled) {
+      const networkLabel = NETWORKS.find(n => n.id === network)?.label || network;
+      return (
+        <div>
+          <BackHeader title="Summary" onBack={() => {}} />
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Network</span><span>{networkLabel}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Phone</span><span>{phone}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(result.amount)}</span></div>
+          </div>
+          <SuccessSheet
+            open
+            title="Success!"
+            subtitle="Airtime delivered"
+            amount={fmtNaira(result.amount)}
+            detail={`to ${phone}`}
+            onDone={onDone}
+          />
+        </div>
+      );
+    }
+
     return (
       <div>
         <BackHeader title="Airtime" onBack={onDone} />
         <div className="flex flex-col items-center text-center py-10">
-          <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${isSettled ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-amber-500/15 border border-amber-500/30'}`}>
-            {isSettled ? <Check className="w-6 h-6 text-emerald-400" /> : <Loader2 className="w-6 h-6 text-amber-400" />}
+          <div className="w-14 h-14 rounded-full flex items-center justify-center mb-5 bg-amber-500/15 border border-amber-500/30">
+            <Loader2 className="w-6 h-6 text-amber-400" />
           </div>
-          <h2 className="text-lg font-bold mb-1">{isSettled ? 'Airtime delivered' : 'Still processing'}</h2>
+          <h2 className="text-lg font-bold mb-1">Still processing</h2>
           <p className="text-sm text-neutral-500 max-w-xs">
-            {isSettled
-              ? `${fmtNaira(result.amount)} airtime sent to ${phone}.`
-              : `Your ${fmtNaira(result.amount)} is confirmed and being delivered by the network. This can take a few minutes — check your transaction history for the final result.`}
+            Your {fmtNaira(result.amount)} is confirmed and being delivered by the network. This can take a few minutes — check your transaction history for the final result.
           </p>
         </div>
         <PrimaryButton onClick={onDone}>Done</PrimaryButton>
@@ -2205,37 +2288,31 @@ function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
       }
     };
     return (
-      <div className="flex flex-col items-center text-center pt-8">
-        <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center mb-4">
-          <Check className="w-5 h-5 text-emerald-400" />
-        </div>
-        <h2 className="text-lg font-bold mb-1">{mode === 'bank' ? 'Transfer initiated' : 'Sent successfully'}</h2>
-        <p className="text-neutral-500 text-sm mb-6">
-          {mode === 'bank'
-            ? "We've sent this to your bank. It usually lands within a few minutes."
-            : 'This landed in their wallet instantly.'}
-        </p>
-
-        <div className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl p-5 flex flex-col items-center mb-6">
-          {mode === 'user' ? (
-            <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center">
-              <LogoMark size={22} />
-            </div>
-          ) : (
-            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-              <Landmark className="w-5 h-5 text-neutral-300" />
-            </div>
-          )}
-          <div className="font-mono text-2xl font-bold mt-3">{fmtNaira(Number(amount) || 0)}</div>
-          <div className="text-sm text-neutral-500 mt-1">to {recipientLabel}</div>
+      <div>
+        {/* The summary stays on screen behind the sheet, so the result reads
+            as something that happened to this transfer, not a new page. */}
+        <BackHeader title="Summary" onBack={() => {}} />
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
+          <div className="flex justify-between text-sm">
+            <span className="text-neutral-500">Amount</span>
+            <span className="font-mono">{fmtNaira(Number(amount) || 0)}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-neutral-500">To</span>
+            <span className="text-right max-w-[65%]">{recipientLabel}</span>
+          </div>
         </div>
 
-        <div className="w-full space-y-3">
-          <button onClick={shareReceipt} className="w-full bg-neutral-900 border border-neutral-800 text-white text-sm font-medium rounded-2xl py-3.5 flex items-center justify-center gap-2 hover:bg-neutral-800 transition">
-            <Share2 className="w-4 h-4" /> Share receipt
-          </button>
-          <PrimaryButton onClick={onDone}>Done</PrimaryButton>
-        </div>
+        <SuccessSheet
+          open
+          title="Success!"
+          subtitle={mode === 'bank' ? 'Transfer processed' : 'Sent instantly'}
+          amount={fmtNaira(Number(amount) || 0)}
+          detail={`to ${recipientLabel}`}
+          onDone={onDone}
+          secondaryLabel="Share receipt"
+          onSecondary={shareReceipt}
+        />
       </div>
     );
   }
@@ -4278,6 +4355,23 @@ function CheckoutPage({ slug }) {
     (!link?.fulfillment_type || link?.fulfillment_type === 'none') && link?.product_type === 'product'
   );
   const custEmailValid = !custEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(custEmail.trim());
+  // A real customer typed "gmail.con" and nothing caught it — the address
+  // was syntactically valid, so the confirmation email would have silently
+  // gone nowhere. Warn on the obvious near-misses without blocking, since
+  // plenty of legitimate domains look unusual.
+  const emailTypoHint = (() => {
+    const e = custEmail.trim().toLowerCase();
+    if (!e.includes('@')) return '';
+    const domain = e.split('@')[1] || '';
+    const corrections = {
+      'gmail.con': 'gmail.com', 'gmail.co': 'gmail.com', 'gmial.com': 'gmail.com',
+      'gmail.cm': 'gmail.com', 'gmai.com': 'gmail.com', 'gmail.comm': 'gmail.com',
+      'yahoo.con': 'yahoo.com', 'yaho.com': 'yahoo.com', 'yahoo.co': 'yahoo.com',
+      'hotmail.con': 'hotmail.com', 'outlook.con': 'outlook.com',
+      'icloud.con': 'icloud.com',
+    };
+    return corrections[domain] ? `Did you mean ${e.split('@')[0]}@${corrections[domain]}?` : '';
+  })();
   const custPhoneValid = !custPhone || /^0\d{10}$/.test(custPhone.replace(/\s/g, ''));
   const customerDetailsComplete = !isBusinessOrder || (
     custName.trim().length > 0 &&
@@ -4423,6 +4517,14 @@ function CheckoutPage({ slug }) {
                     placeholder="Email"
                     className={`w-full bg-neutral-900 border rounded-xl px-3.5 py-2.5 text-sm outline-none placeholder-neutral-600 ${custEmail && !custEmailValid ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`}
                   />
+                  {emailTypoHint && (
+                    <button
+                      onClick={() => setCustEmail(emailTypoHint.replace(/^Did you mean /, '').replace(/\?$/, ''))}
+                      className="w-full text-left text-[11px] text-amber-400 -mt-1 px-1"
+                    >
+                      {emailTypoHint} <span className="underline">Tap to fix</span>
+                    </button>
+                  )}
                   <input
                     inputMode="numeric"
                     value={custPhone}
@@ -4640,15 +4742,23 @@ function CheckoutPage({ slug }) {
             <div className="text-xs text-neutral-500 mb-2.5">Contact {link.business_name}</div>
             <div className="space-y-2">
               {link.business_contact_phone && (
-                <a href={`https://wa.me/${String(link.business_contact_phone).replace(/[^0-9]/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-neutral-300">
+                <a
+                  href={`https://wa.me/${String(link.business_contact_phone).replace(/\D/g, '').replace(/^0/, '234')}?text=${encodeURIComponent(`Hi ${link.business_name}, about my payment ${notice.reference} for ${link.title}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full bg-white text-black rounded-xl py-2.5 text-sm font-semibold"
+                >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-                  WhatsApp
+                  Message on WhatsApp
                 </a>
               )}
               {link.business_contact_email && (
-                <a href={`mailto:${link.business_contact_email}`} className="flex items-center gap-2 text-sm text-neutral-300">
+                <a
+                  href={`mailto:${link.business_contact_email}?subject=${encodeURIComponent(`Payment ${notice.reference} — ${link.title}`)}`}
+                  className="flex items-center justify-center gap-2 w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 text-sm text-neutral-300"
+                >
                   <Mail className="w-4 h-4 flex-shrink-0" />
-                  {link.business_contact_email}
+                  Send an email
                 </a>
               )}
               {!link.business_contact_phone && !link.business_contact_email && (
