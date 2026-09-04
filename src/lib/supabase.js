@@ -694,6 +694,26 @@ export async function getMyTranxactPayments() {
 
 // Public — no auth required, since a checkout payer often isn't signed in at all.
 // Creates a real backend record of the claim; does not confirm or settle anything.
+// Fires exactly once, at genuine first entry into the app (not at signup,
+// since no session exists yet at that point — email confirmation happens
+// first). The server ignores whatever "to" address is passed and always
+// uses the caller's own verified session email, so this can never become a
+// way to email anyone else.
+export async function sendWelcomeEmail(username) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { sent: false, reason: 'no_session' };
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ type: 'welcome', data: { username } }),
+  });
+  return res.json();
+}
+
 export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_amount, customer_name, customer_email, customer_phone, delivery_address, idempotency_key }) {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/notify-payment-sent`, {
     method: 'POST',
