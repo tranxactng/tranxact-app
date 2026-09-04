@@ -3,7 +3,7 @@ import {
   Eye, EyeOff, Bell, ArrowDownToLine, ArrowUpFromLine, Link2, Smartphone, Wifi, Zap, Tv,
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
-  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar
+  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar, Search
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -16,7 +16,7 @@ import {
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, createStorefrontEvent, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent,
-  updateStorefrontItem, setStorefrontItemStatus, deleteStorefrontItem, duplicateStorefrontItem, createCartCheckout, getMyStorefrontOrders, getMyStorefrontCustomers, trackStorefrontEvent, getStorefrontAnalytics, updateStorefrontOrderStatus, getStorefrontOrderByToken, setStorefrontPaused, setItemFulfillment,
+  updateStorefrontItem, setStorefrontItemStatus, deleteStorefrontItem, duplicateStorefrontItem, createCartCheckout, getMyStorefrontOrders, getMyStorefrontCustomers, trackStorefrontEvent, getStorefrontAnalytics, updateStorefrontOrderStatus, getStorefrontOrderByToken, setStorefrontPaused, setItemFulfillment, sendWelcomeEmail,
   isBusinessSlugAvailable, createBusiness, getMyBusiness, updateBusiness, getMyBusinessProducts, getBusinessStorefront, uploadBusinessAsset,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
   listPaystackBanks, resolveBankAccount,
@@ -246,6 +246,121 @@ function SuccessSheet({ open, title = 'Success!', subtitle, amount, detail, onDo
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// People search by the name they actually use, not the registered one.
+// "gtb" should find Guaranty Trust, "first bank" should find FBN.
+const BANK_ALIASES = {
+  'guaranty trust': ['gtb', 'gt bank', 'gtbank'],
+  'first bank': ['fbn'],
+  'united bank for africa': ['uba'],
+  'zenith': ['zenith'],
+  'access': ['access'],
+  'fidelity': ['fidelity'],
+  'stanbic': ['stanbic ibtc', 'ibtc'],
+  'ecobank': ['eco'],
+  'sterling': ['sterling'],
+  'union bank': ['union'],
+  'wema': ['alat', 'wema'],
+  'polaris': ['polaris'],
+  'keystone': ['keystone'],
+  'providus': ['providus'],
+  'kuda': ['kuda'],
+  'moniepoint': ['monie', 'moniepoint'],
+  'opay': ['opay'],
+  'palmpay': ['palmpay', 'palm pay'],
+};
+
+function bankMatches(bankName, query) {
+  const n = bankName.toLowerCase();
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (n.includes(q)) return true;
+  // Check whether the query is a known nickname for this bank.
+  for (const [official, aliases] of Object.entries(BANK_ALIASES)) {
+    if (n.includes(official) && aliases.some(a => a.includes(q) || q.includes(a))) return true;
+  }
+  return false;
+}
+
+// Nigeria has 200+ banks and microfinance institutions. Scrolling a native
+// select to find one is painful, so this lets you type to filter and pick.
+function BankPicker({ banks, banksError, bankCode, onSelect }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const selected = (banks || []).find(b => b.code === bankCode);
+
+  const filtered = (banks || []).filter(b => bankMatches(b.name, query));
+
+  if (banks === null) {
+    return (
+      <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3.5">
+        <Landmark className="w-4 h-4 text-neutral-500 flex-shrink-0" />
+        <span className="text-sm text-neutral-500">Loading banks…</span>
+      </div>
+    );
+  }
+  if (banks.length === 0) {
+    return (
+      <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3.5">
+        <Landmark className="w-4 h-4 text-neutral-500 flex-shrink-0" />
+        <span className="text-sm text-red-400">{banksError || 'Could not load banks'}</span>
+      </div>
+    );
+  }
+
+  // Collapsed: show the chosen bank, tap to change.
+  if (selected && !open) {
+    return (
+      <button
+        onClick={() => { setOpen(true); setQuery(''); }}
+        className="w-full flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3.5 text-left"
+      >
+        <Landmark className="w-4 h-4 text-neutral-500 flex-shrink-0" />
+        <span className="text-sm text-white flex-1 truncate">{selected.name}</span>
+        <span className="text-xs text-neutral-500 flex-shrink-0">Change</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3.5">
+        <Search className="w-4 h-4 text-neutral-500 flex-shrink-0" />
+        <input
+          autoFocus={open}
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder="Search your bank"
+          className="bg-transparent outline-none text-white text-sm w-full placeholder-neutral-600"
+        />
+        {query && (
+          <button onClick={() => setQuery('')} className="text-neutral-500 flex-shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="mt-2 max-h-64 overflow-y-auto bg-neutral-950 border border-neutral-800 rounded-2xl">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-neutral-600">No bank matches "{query}".</div>
+          ) : (
+            filtered.map(b => (
+              <button
+                key={b.code}
+                onClick={() => { onSelect(b.code); setOpen(false); setQuery(''); }}
+                className={`w-full text-left px-4 py-3 text-sm border-b border-neutral-900 last:border-b-0 hover:bg-neutral-900 transition ${b.code === bankCode ? 'text-violet-400' : 'text-neutral-300'}`}
+              >
+                {b.name}
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1454,18 +1569,37 @@ function TVScreen({ onBack, onDone, hasPin }) {
 
   if (step === 'result' && result) {
     const isSettled = result.status === 'settled';
+
+    if (isSettled) {
+      return (
+        <div>
+          <BackHeader title="Summary" onBack={() => {}} />
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Package</span><span className="text-right max-w-[65%]">{selectedPackage?.name}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Smartcard</span><span className="text-right max-w-[65%]">{verifiedCustomer?.customer_name || 'this smartcard'}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(result.amount)}</span></div>
+          </div>
+          <SuccessSheet
+            open
+            title="Success!"
+            subtitle="Subscription active"
+            detail={`${selectedPackage?.name || 'Your package'} activated`}
+            onDone={onDone}
+          />
+        </div>
+      );
+    }
+
     return (
       <div>
         <BackHeader title="TV Subscription" onBack={onDone} />
         <div className="flex flex-col items-center text-center py-10">
-          <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${isSettled ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-amber-500/15 border border-amber-500/30'}`}>
-            {isSettled ? <Check className="w-6 h-6 text-emerald-400" /> : <Loader2 className="w-6 h-6 text-amber-400" />}
+          <div className="w-14 h-14 rounded-full flex items-center justify-center mb-5 bg-amber-500/15 border border-amber-500/30">
+            <Loader2 className="w-6 h-6 text-amber-400" />
           </div>
-          <h2 className="text-lg font-bold mb-1">{isSettled ? 'Subscription active' : 'Still processing'}</h2>
+          <h2 className="text-lg font-bold mb-1">Still processing</h2>
           <p className="text-sm text-neutral-500 max-w-xs">
-            {isSettled
-              ? `${selectedPackage?.name || 'Your package'} activated for ${verifiedCustomer?.customer_name || 'this smartcard'}.`
-              : `Your ${fmtNaira(result.amount)} is confirmed and being processed. Check your transaction history for the final result.`}
+            Your {fmtNaira(result.amount)} is confirmed and being processed. Check your transaction history for the final result.
           </p>
         </div>
         <PrimaryButton onClick={onDone}>Done</PrimaryButton>
@@ -1669,25 +1803,43 @@ function ElectricityScreen({ onBack, onDone, hasPin }) {
 
   if (step === 'result' && result) {
     const isSettled = result.status === 'settled';
-    return (
-      <div>
-        <BackHeader title="Electricity" onBack={onDone} />
-        <div className="flex flex-col items-center text-center py-8">
-          <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${isSettled ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-amber-500/15 border border-amber-500/30'}`}>
-            {isSettled ? <Check className="w-6 h-6 text-emerald-400" /> : <Loader2 className="w-6 h-6 text-amber-400" />}
+
+    if (isSettled) {
+      return (
+        <div>
+          <BackHeader title="Summary" onBack={() => {}} />
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-4">
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Paid to</span><span className="text-right max-w-[65%]">{verifiedCustomer?.customer_name || 'this meter'}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(result.amount)}</span></div>
           </div>
-          <h2 className="text-lg font-bold mb-1">{isSettled ? 'Payment successful' : 'Still processing'}</h2>
-          <p className="text-sm text-neutral-500 max-w-xs mb-5">
-            {isSettled
-              ? `${fmtNaira(result.amount)} paid to ${verifiedCustomer?.customer_name || 'this meter'}.`
-              : `Your ${fmtNaira(result.amount)} is confirmed and being processed. Check your transaction history for the final result.`}
-          </p>
           {result.token && (
-            <div className="w-full bg-neutral-950 border border-emerald-500/30 rounded-2xl p-4 text-left">
+            <div className="bg-neutral-950 border border-emerald-500/30 rounded-2xl p-4 text-left mb-6">
               <div className="text-xs text-neutral-500 mb-1.5">Your prepaid token — load this on your meter</div>
               <div className="font-mono text-sm text-emerald-400 break-all">{result.token}</div>
             </div>
           )}
+          <SuccessSheet
+            open
+            title="Success!"
+            subtitle="Payment successful"
+            amount={fmtNaira(result.amount)}
+            onDone={onDone}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <BackHeader title="Electricity" onBack={onDone} />
+        <div className="flex flex-col items-center text-center py-8">
+          <div className="w-14 h-14 rounded-full flex items-center justify-center mb-5 bg-amber-500/15 border border-amber-500/30">
+            <Loader2 className="w-6 h-6 text-amber-400" />
+          </div>
+          <h2 className="text-lg font-bold mb-1">Still processing</h2>
+          <p className="text-sm text-neutral-500 max-w-xs mb-5">
+            Your {fmtNaira(result.amount)} is confirmed and being processed. Check your transaction history for the final result.
+          </p>
         </div>
         <PrimaryButton onClick={onDone}>Done</PrimaryButton>
       </div>
@@ -2069,18 +2221,37 @@ function DataScreen({ onBack, onDone, hasPin }) {
 
   if (step === 'result' && result) {
     const isSettled = result.status === 'settled';
+
+    if (isSettled) {
+      return (
+        <div>
+          <BackHeader title="Summary" onBack={() => {}} />
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Plan</span><span className="text-right max-w-[65%]">{selectedPlan?.name}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Phone</span><span>{phone}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(result.amount)}</span></div>
+          </div>
+          <SuccessSheet
+            open
+            title="Success!"
+            subtitle="Data delivered"
+            detail={`${selectedPlan?.name || 'Your plan'} sent to ${phone}`}
+            onDone={onDone}
+          />
+        </div>
+      );
+    }
+
     return (
       <div>
         <BackHeader title="Data" onBack={onDone} />
         <div className="flex flex-col items-center text-center py-10">
-          <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-5 ${isSettled ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-amber-500/15 border border-amber-500/30'}`}>
-            {isSettled ? <Check className="w-6 h-6 text-emerald-400" /> : <Loader2 className="w-6 h-6 text-amber-400" />}
+          <div className="w-14 h-14 rounded-full flex items-center justify-center mb-5 bg-amber-500/15 border border-amber-500/30">
+            <Loader2 className="w-6 h-6 text-amber-400" />
           </div>
-          <h2 className="text-lg font-bold mb-1">{isSettled ? 'Data delivered' : 'Still processing'}</h2>
+          <h2 className="text-lg font-bold mb-1">Still processing</h2>
           <p className="text-sm text-neutral-500 max-w-xs">
-            {isSettled
-              ? `${selectedPlan?.name || 'Your plan'} sent to ${phone}.`
-              : `Your ${fmtNaira(result.amount)} purchase is confirmed and being delivered by the network. This can take a few minutes — check your transaction history for the final result.`}
+            Your {fmtNaira(result.amount)} purchase is confirmed and being delivered by the network. This can take a few minutes — check your transaction history for the final result.
           </p>
         </div>
         <PrimaryButton onClick={onDone}>Done</PrimaryButton>
@@ -2374,23 +2545,7 @@ function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
           <>
             <label className="block">
               <span className="text-sm text-neutral-400 mb-2 block">Bank</span>
-              <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
-                <Landmark className="w-4 h-4 text-neutral-500 flex-shrink-0" />
-                {banks === null ? (
-                  <span className="text-sm text-neutral-500">Loading banks…</span>
-                ) : banks.length === 0 ? (
-                  <span className="text-sm text-red-400">{banksError || 'Could not load banks'}</span>
-                ) : (
-                  <select
-                    value={bankCode}
-                    onChange={e => setBankCode(e.target.value)}
-                    className="bg-transparent outline-none text-white text-sm w-full appearance-none"
-                  >
-                    <option value="" className="bg-neutral-900">Select a bank</option>
-                    {banks.map(b => <option key={b.code} value={b.code} className="bg-neutral-900">{b.name}</option>)}
-                  </select>
-                )}
-              </div>
+              <BankPicker banks={banks} banksError={banksError} bankCode={bankCode} onSelect={setBankCode} />
             </label>
             <Field label="Account number" value={accountNumber} onChange={e => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="0123456789" />
             {resolving && <div className="text-sm text-neutral-500 -mt-2 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying account…</div>}
@@ -5628,16 +5783,7 @@ function DashboardWithdrawals({ balance, withdrawals, onRequest, requesting, req
           <Field label="Amount (NGN)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
           <div>
             <span className="text-sm text-neutral-400 mb-2 block">Bank</span>
-            {banks === null ? (
-              <div className="text-sm text-neutral-500 py-2.5">Loading banks…</div>
-            ) : banks.length === 0 ? (
-              <div className="text-sm text-red-400 py-2.5">{banksError || 'Could not load banks'}</div>
-            ) : (
-              <select value={bankCode} onChange={e => setBankCode(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm w-full text-white">
-                <option value="">Select a bank</option>
-                {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
-              </select>
-            )}
+            <BankPicker banks={banks} banksError={banksError} bankCode={bankCode} onSelect={setBankCode} />
           </div>
           <Field label="Account Number" value={accountNumber} onChange={e => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="0123456789" />
           <div>
@@ -5847,6 +5993,10 @@ function MobileAppRoot() {
   const handleWelcomeContinue = async () => {
     localStorage.setItem('hasSeenWelcome', 'true');
     try { await supabase.auth.updateUser({ data: { hasSeenWelcome: true } }); } catch { /* best-effort */ }
+    // Real first entry — a confirmed session finally exists at this point,
+    // which is why this couldn't fire at signup time. Never blocks getting
+    // into the app if it's slow or fails; nothing here is awaited by setScreen.
+    sendWelcomeEmail(profile?.username).catch(() => {});
     setScreen('app');
   };
 
@@ -8125,12 +8275,12 @@ function EditItemScreen({ item, onBack, onSaved }) {
 }
 
 // The single real entry point. Decides which experience to render based on
-// which domain someone's actually on — same codebase, same auth, same data,
-// just a different front door. pay.tranxact.co gets the merchant dashboard
-// (storefront management now lives there too, as a tab); business.tranxact.co
+// which domain someone's actually on. pay.tranxact.co redirects straight
+// into the app — TranxactPay already lives there in full, so the separate
+// merchant dashboard has nothing unique left to offer; business.tranxact.co
 // is purely a public storefront viewer — no login, no dashboard, just what a
-// customer sees when they open a shared link; everything else gets the
-// normal mobile-first app.
+// customer sees when they open a shared link or track a real order;
+// everything else gets the normal mobile-first app.
 export default function TranxactApp() {
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
@@ -8143,7 +8293,17 @@ export default function TranxactApp() {
   const isNativeApp = typeof window !== 'undefined' && Boolean(window.Capacitor?.isNativePlatform?.());
   if (isNativeApp) return <MobileAppRoot />;
 
-  if (hostname.startsWith('pay.')) return <WebDashboardApp />;
+  // pay.tranxact.co no longer has its own experience — TranxactPay (create a
+  // link, view existing ones, get paid) already lives fully inside the app
+  // itself. WebDashboardApp and every Dashboard* screen underneath it are
+  // left untouched, just unreachable by normal navigation — nothing here is
+  // deleted, only this one routing branch changed.
+  if (hostname.startsWith('pay.')) {
+    if (typeof window !== 'undefined') {
+      window.location.href = `https://app.tranxact.co${pathname}${window.location.search}`;
+    }
+    return null;
+  }
 
   if (hostname.startsWith('business.')) {
     const parts = pathname.replace(/^\//, '').split('/');
