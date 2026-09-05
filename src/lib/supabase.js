@@ -107,6 +107,64 @@ export async function getRecentTransactions(userId, limit = 20) {
   return { data: mapped, error: null };
 }
 
+// A real, complete month of history — no small cap, since "See all" showing
+// only 50 transactions ever was the actual bug being fixed here. Scoped by
+// month specifically so a genuinely long history stays fast and readable
+// rather than trying to load someone's entire lifetime of transactions at once.
+export async function getTransactionsForMonth(userId, year, month) {
+  const { data: wallet, error: walletErr } = await supabase
+    .from('wallets')
+    .select('id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (walletErr || !wallet) return { data: [], error: walletErr };
+
+  const startOfMonth = new Date(year, month, 1).toISOString();
+  const startOfNextMonth = new Date(year, month + 1, 1).toISOString();
+
+  const { data, error } = await supabase
+    .from('ledger_entries')
+    .select('amount, transaction_id, created_at, transactions(type, status, counterparty, description, crypto_asset, user_id)')
+    .eq('wallet_id', wallet.id)
+    .gte('created_at', startOfMonth)
+    .lt('created_at', startOfNextMonth)
+    .order('created_at', { ascending: false })
+    .limit(1000); // a real sanity ceiling, not a practical limit for one month
+
+  if (error) return { data: null, error };
+
+  const needsSenderLookup = (data || [])
+    .filter(row => row.transactions?.type === 'send_user' && Number(row.amount) > 0 && row.transactions?.user_id)
+    .map(row => row.transactions.user_id);
+
+  let senderUsernames = {};
+  if (needsSenderLookup.length > 0) {
+    const { data: senderProfiles } = await supabase.rpc('get_usernames_by_ids', { p_ids: [...new Set(needsSenderLookup)] });
+    senderUsernames = Object.fromEntries((senderProfiles || []).map(p => [p.id, p.username]));
+  }
+
+  const mapped = (data || []).map(row => {
+    const t = row.transactions;
+    const received = Number(row.amount) > 0;
+    const counterparty = (t?.type === 'send_user' && received)
+      ? senderUsernames[t.user_id] || t.counterparty
+      : t?.counterparty;
+    return {
+      id: row.transaction_id,
+      type: t?.type,
+      status: t?.status,
+      amount_ngn: row.amount,
+      crypto_asset: t?.crypto_asset,
+      counterparty,
+      direction: received ? 'received' : 'sent',
+      description: t?.description,
+      created_at: row.created_at,
+    };
+  });
+
+  return { data: mapped, error: null };
+}
+
 // Calls the deployed edge function to send naira to another Tranxact user by username.
 export async function sendToUser(username, amount) {
   const { data: { session } } = await supabase.auth.getSession();
