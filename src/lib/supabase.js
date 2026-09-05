@@ -281,7 +281,7 @@ export async function adminSettle(payload) {
 export async function getReferralEarnings(userId) {
   const { data, error } = await supabase
     .from('referral_earnings')
-    .select('amount, status, created_at')
+    .select('amount, status, type, created_at')
     .eq('referrer_id', userId)
     .order('created_at', { ascending: false });
   return { data, error };
