@@ -5045,18 +5045,47 @@ function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, o
 // ---------- Referrals ----------
 function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
   const [copied, setCopied] = useState(false);
-  const [pendingBalance, setPendingBalance] = useState(null);
+  const [breakdown, setBreakdown] = useState(null); // { referral, cashback, total }
 
   useEffect(() => {
     getReferralEarnings(userId).then(({ data }) => {
-      const total = (data || []).filter(e => e.status === 'pending').reduce((sum, e) => sum + Number(e.amount), 0);
-      setPendingBalance(total);
+      const pending = (data || []).filter(e => e.status === 'pending');
+      const referral = pending.filter(e => e.type !== 'cashback').reduce((s, e) => s + Number(e.amount), 0);
+      const cashback = pending.filter(e => e.type === 'cashback').reduce((s, e) => s + Number(e.amount), 0);
+      setBreakdown({ referral, cashback, total: referral + cashback });
     });
   }, [userId]);
+
   return (
     <div>
       <h1 className="text-xl font-bold mb-1">Earn</h1>
-      <p className="text-sm text-neutral-500 mb-5">Every way to make Tranxact pay you back.</p>
+      <p className="text-sm text-neutral-500 mb-5">Every way Tranxact pays you back.</p>
+
+      {/* The real, combined headline number — referrals and cashback, one
+          balance, since that's genuinely what the withdraw button moves. */}
+      <div
+        className="rounded-2xl p-6 mb-4 text-center relative overflow-hidden"
+        style={{ background: 'linear-gradient(145deg, #1E1B3A 0%, #0F2E26 100%)', border: '1px solid #2A2A30' }}
+      >
+        <p className="text-xs text-neutral-400 mb-1.5">Total earnings</p>
+        {breakdown === null ? (
+          <div className="flex justify-center py-3"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+        ) : (
+          <div className="font-mono text-3xl font-bold mb-4">{fmtNaira(breakdown.total)}</div>
+        )}
+        {breakdown !== null && (
+          <div className="flex items-center justify-center gap-4 text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-violet-400" />
+              <span className="text-neutral-400">Referrals <span className="text-white font-mono">{fmtNaira(breakdown.referral)}</span></span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-teal-400" />
+              <span className="text-neutral-400">Cashback <span className="text-white font-mono">{fmtNaira(breakdown.cashback)}</span></span>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 mb-4 text-center">
         <p className="text-sm text-neutral-500 mb-2">Your referral code</p>
@@ -5087,10 +5116,10 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
         <button onClick={onEarnings} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 hover:bg-neutral-900 transition">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center"><Wallet className="w-4 h-4 text-violet-400" /></div>
-            <span className="text-sm font-medium">Referral Earnings</span>
+            <span className="text-sm font-medium">Earnings</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-sm text-neutral-400">{pendingBalance === null ? '···' : fmtNaira(pendingBalance)}</span>
+            <span className="font-mono text-sm text-neutral-400">{breakdown === null ? '···' : fmtNaira(breakdown.total)}</span>
             <ChevronRight className="w-4 h-4 text-neutral-600" />
           </div>
         </button>
@@ -5102,26 +5131,25 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
           <ChevronRight className="w-4 h-4 text-neutral-600" />
         </button>
       </div>
-      <p className="text-xs text-neutral-600 mb-6 text-center">
-        You earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
-      </p>
 
-      {/* Genuinely not live yet — no rate has been decided, no backend
-          crediting exists. Shown honestly as coming soon rather than as a
-          working feature, so nobody expects cashback that isn't real yet. */}
-      <div className="bg-neutral-950 border border-dashed border-neutral-800 rounded-2xl p-5">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-9 h-9 rounded-full bg-teal-500/15 flex items-center justify-center flex-shrink-0"><Sparkles className="w-4 h-4 text-teal-400" /></div>
-          <span className="text-sm font-semibold">Cashback Rewards</span>
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 ml-auto">Coming soon</span>
+      <div className="space-y-3">
+        <div className="flex items-start gap-3 px-1">
+          <div className="w-8 h-8 rounded-full bg-violet-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Users className="w-3.5 h-3.5 text-violet-400" /></div>
+          <p className="text-xs text-neutral-500 leading-relaxed">
+            <span className="text-neutral-300 font-medium">Referrals:</span> earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
+          </p>
         </div>
-        <p className="text-xs text-neutral-500 leading-relaxed">
-          Earn a little back on the things you already pay for, bills, transfers, and more, on top of what referrals bring in.
-        </p>
+        <div className="flex items-start gap-3 px-1">
+          <div className="w-8 h-8 rounded-full bg-teal-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Sparkles className="w-3.5 h-3.5 text-teal-400" /></div>
+          <p className="text-xs text-neutral-500 leading-relaxed">
+            <span className="text-neutral-300 font-medium">Cashback:</span> earn 1% back on every airtime, data, electricity, or TV bill you pay for through Tranxact.
+          </p>
+        </div>
       </div>
     </div>
   );
 }
+
 
 function ReferralEarningsScreen({ onBack, userId, onWithdrawn }) {
   const [earnings, setEarnings] = useState(null);
@@ -5136,9 +5164,10 @@ function ReferralEarningsScreen({ onBack, userId, onWithdrawn }) {
 
   useEffect(() => { load(); }, []);
 
-  const pendingBalance = (earnings || [])
-    .filter(e => e.status === 'pending')
-    .reduce((sum, e) => sum + Number(e.amount), 0);
+  const pending = (earnings || []).filter(e => e.status === 'pending');
+  const referralBalance = pending.filter(e => e.type !== 'cashback').reduce((s, e) => s + Number(e.amount), 0);
+  const cashbackBalance = pending.filter(e => e.type === 'cashback').reduce((s, e) => s + Number(e.amount), 0);
+  const pendingBalance = referralBalance + cashbackBalance;
 
   const handleWithdraw = async () => {
     setError('');
@@ -5157,9 +5186,12 @@ function ReferralEarningsScreen({ onBack, userId, onWithdrawn }) {
 
   return (
     <div>
-      <BackHeader title="Referral Earnings" onBack={onBack} />
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 text-center mb-6">
-        <p className="text-sm text-neutral-500 mb-2">Available balance</p>
+      <BackHeader title="Earnings" onBack={onBack} />
+      <div
+        className="rounded-2xl p-6 text-center mb-4"
+        style={{ background: 'linear-gradient(145deg, #1E1B3A 0%, #0F2E26 100%)', border: '1px solid #2A2A30' }}
+      >
+        <p className="text-sm text-neutral-400 mb-2">Available balance</p>
         {earnings === null ? (
           <div className="flex justify-center py-2 mb-5"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
         ) : (
@@ -5170,10 +5202,59 @@ function ReferralEarningsScreen({ onBack, userId, onWithdrawn }) {
           {withdrawing ? <Loader2 className="w-4 h-4 animate-spin" /> : withdrawn ? <><Check className="w-4 h-4" /> Withdrawn to wallet</> : 'Withdraw to Tranxact Wallet'}
         </PrimaryButton>
       </div>
+
+      {earnings !== null && (
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="w-2 h-2 rounded-full bg-violet-400" />
+              <span className="text-xs text-neutral-500">Referrals</span>
+            </div>
+            <div className="font-mono text-lg font-semibold">{fmtNaira(referralBalance)}</div>
+          </div>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="w-2 h-2 rounded-full bg-teal-400" />
+              <span className="text-xs text-neutral-500">Cashback</span>
+            </div>
+            <div className="font-mono text-lg font-semibold">{fmtNaira(cashbackBalance)}</div>
+          </div>
+        </div>
+      )}
+
+      {earnings && earnings.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-sm font-semibold mb-2">Recent activity</h2>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+            {earnings.slice(0, 10).map((e, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${e.type === 'cashback' ? 'bg-teal-400' : 'bg-violet-400'}`} />
+                  <div>
+                    <div className="text-sm">{e.type === 'cashback' ? 'Bill cashback' : 'Referral bonus'}</div>
+                    <div className="text-[11px] text-neutral-600">{new Date(e.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-mono text-sm">{fmtNaira(Number(e.amount))}</div>
+                  <div className={`text-[10px] ${e.status === 'withdrawn' ? 'text-neutral-600' : 'text-emerald-400'}`}>{e.status === 'withdrawn' ? 'Withdrawn' : 'Pending'}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <h2 className="text-sm font-semibold mb-2">How it works</h2>
-      <p className="text-xs text-neutral-500">
-        Earn 25% of the crypto funding fee every time someone you referred receives crypto. Withdraw anytime to your main wallet balance.
-      </p>
+      <div className="space-y-2.5">
+        <p className="text-xs text-neutral-500">
+          <span className="text-neutral-300 font-medium">Referrals:</span> earn 25% of the crypto funding fee every time someone you referred receives crypto.
+        </p>
+        <p className="text-xs text-neutral-500">
+          <span className="text-neutral-300 font-medium">Cashback:</span> earn 1% back on every airtime, data, electricity, or TV bill you pay for.
+        </p>
+        <p className="text-xs text-neutral-600">Withdraw anytime to your main wallet balance.</p>
+      </div>
     </div>
   );
 }
