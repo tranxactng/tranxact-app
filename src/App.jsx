@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
-  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
+  getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, getTransactionsForMonth, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminCheckBtcBalance, adminCheckSolBalance,
@@ -97,6 +97,7 @@ function mapTransaction(row) {
     time: listTime,
     fullTime: validDate ? createdDate.toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' }) : '',
     dateKey: validDate ? createdDate.toDateString() : '',
+    createdAt: validDate ? createdDate : null,
     icon: meta.icon,
   };
 }
@@ -1202,7 +1203,34 @@ function NotificationsScreen({ onBack }) {
   );
 }
 
-function HistoryScreen({ onBack, transactions = [], onSendAgain }) {
+function HistoryScreen({ onBack, onSendAgain, userId }) {
+  // Local state only — deliberately not lifted to a parent, so leaving this
+  // screen and coming back always starts fresh at the current month again,
+  // exactly as asked, with no extra reset logic needed.
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth()); // 0-indexed
+  const [transactions, setTransactions] = useState(null); // null = loading
+
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+
+  useEffect(() => {
+    setTransactions(null);
+    getTransactionsForMonth(userId, year, month).then(({ data }) => {
+      setTransactions((data || []).map(mapTransaction));
+    });
+  }, [userId, year, month]);
+
+  const goPrevMonth = () => {
+    if (month === 0) { setYear(y => y - 1); setMonth(11); }
+    else setMonth(m => m - 1);
+  };
+  const goNextMonth = () => {
+    if (isCurrentMonth) return; // never navigate into the future
+    if (month === 11) { setYear(y => y + 1); setMonth(0); }
+    else setMonth(m => m + 1);
+  };
+
   const todayKey = new Date().toDateString();
   const yesterdayKey = new Date(Date.now() - 86400000).toDateString();
   const groupLabel = (dateKey) => {
@@ -1212,7 +1240,7 @@ function HistoryScreen({ onBack, transactions = [], onSendAgain }) {
   };
 
   const groups = [];
-  for (const tx of transactions) {
+  for (const tx of transactions || []) {
     const key = tx.dateKey || 'Earlier';
     const last = groups[groups.length - 1];
     if (last && last.key === key) last.items.push(tx);
@@ -1222,9 +1250,29 @@ function HistoryScreen({ onBack, transactions = [], onSendAgain }) {
   return (
     <div>
       <BackHeader title="Transaction History" onBack={onBack} />
-      {transactions.length === 0 ? (
+
+      <div className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-2xl px-2 py-2 mb-5">
+        <button onClick={goPrevMonth} className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-neutral-900 transition" aria-label="Previous month">
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <span className="text-sm font-semibold">
+          {new Date(year, month).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })}
+        </span>
+        <button
+          onClick={goNextMonth}
+          disabled={isCurrentMonth}
+          className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-neutral-900 transition disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Next month"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {transactions === null ? (
+        <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-neutral-600" /></div>
+      ) : transactions.length === 0 ? (
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl py-10 text-center">
-          <p className="text-sm text-neutral-500">No transactions yet</p>
+          <p className="text-sm text-neutral-500">No transactions in {new Date(year, month).toLocaleDateString('en-NG', { month: 'long' })}</p>
         </div>
       ) : (
         <div className="space-y-5">
@@ -2532,7 +2580,7 @@ function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
       <BackHeader title="Send" onBack={onBack} />
       <TabToggle
         value={mode}
-        onChange={setMode}
+        onChange={(m) => { setMode(m); setAmount(''); }}
         options={[
           { value: 'user', label: 'Tranxact User' },
           { value: 'bank', label: 'Bank Account' },
@@ -2543,10 +2591,10 @@ function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
           <Field label="Tranxact username" icon={User} value={username} onChange={e => setUsername(e.target.value)} placeholder="david" />
         ) : (
           <>
-            <label className="block">
+            <div className="block">
               <span className="text-sm text-neutral-400 mb-2 block">Bank</span>
               <BankPicker banks={banks} banksError={banksError} bankCode={bankCode} onSelect={setBankCode} />
-            </label>
+            </div>
             <Field label="Account number" value={accountNumber} onChange={e => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="0123456789" />
             {resolving && <div className="text-sm text-neutral-500 -mt-2 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying account…</div>}
             {resolvedName && <div className="text-sm text-emerald-400 -mt-2">{resolvedName}</div>}
@@ -5043,18 +5091,38 @@ function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, o
 }
 
 // ---------- Referrals ----------
-function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
+function EarnScreen({ onEarnings, onLeaderboard, username, userId, onWithdrawn }) {
   const [copied, setCopied] = useState(false);
   const [breakdown, setBreakdown] = useState(null); // { referral, cashback, total }
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawn, setWithdrawn] = useState(false);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
+  const loadBreakdown = () => {
     getReferralEarnings(userId).then(({ data }) => {
       const pending = (data || []).filter(e => e.status === 'pending');
       const referral = pending.filter(e => e.type !== 'cashback').reduce((s, e) => s + Number(e.amount), 0);
       const cashback = pending.filter(e => e.type === 'cashback').reduce((s, e) => s + Number(e.amount), 0);
       setBreakdown({ referral, cashback, total: referral + cashback });
     });
-  }, [userId]);
+  };
+
+  useEffect(() => { loadBreakdown(); }, [userId]);
+
+  const handleWithdraw = async () => {
+    setError('');
+    setWithdrawing(true);
+    try {
+      await withdrawReferralEarnings();
+      setWithdrawn(true);
+      loadBreakdown();
+      onWithdrawn?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setWithdrawing(false);
+    }
+  };
 
   return (
     <div>
@@ -5062,7 +5130,8 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
       <p className="text-sm text-neutral-500 mb-5">Every way Tranxact pays you back.</p>
 
       {/* The real, combined headline number — referrals and cashback, one
-          balance, since that's genuinely what the withdraw button moves. */}
+          balance — with withdraw right here at the first place it's shown,
+          rather than making people tap through to move their own money. */}
       <div
         className="rounded-2xl p-6 mb-4 text-center relative overflow-hidden"
         style={{ background: 'linear-gradient(145deg, #1E1B3A 0%, #0F2E26 100%)', border: '1px solid #2A2A30' }}
@@ -5074,7 +5143,7 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
           <div className="font-mono text-3xl font-bold mb-4">{fmtNaira(breakdown.total)}</div>
         )}
         {breakdown !== null && (
-          <div className="flex items-center justify-center gap-4 text-xs">
+          <div className="flex items-center justify-center gap-4 text-xs mb-5">
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-violet-400" />
               <span className="text-neutral-400">Referrals <span className="text-white font-mono">{fmtNaira(breakdown.referral)}</span></span>
@@ -5084,6 +5153,12 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
               <span className="text-neutral-400">Cashback <span className="text-white font-mono">{fmtNaira(breakdown.cashback)}</span></span>
             </div>
           </div>
+        )}
+        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+        {breakdown !== null && (
+          <PrimaryButton onClick={handleWithdraw} disabled={withdrawing || breakdown.total <= 0 || withdrawn}>
+            {withdrawing ? <Loader2 className="w-4 h-4 animate-spin" /> : withdrawn ? <><Check className="w-4 h-4" /> Withdrawn to wallet</> : 'Withdraw to Tranxact Wallet'}
+          </PrimaryButton>
         )}
       </div>
 
@@ -5112,16 +5187,13 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
         </div>
       </div>
 
-      <div className="space-y-2 mb-6">
+      <div className="space-y-2">
         <button onClick={onEarnings} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 hover:bg-neutral-900 transition">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center"><Wallet className="w-4 h-4 text-violet-400" /></div>
             <span className="text-sm font-medium">Earnings</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-sm text-neutral-400">{breakdown === null ? '···' : fmtNaira(breakdown.total)}</span>
-            <ChevronRight className="w-4 h-4 text-neutral-600" />
-          </div>
+          <ChevronRight className="w-4 h-4 text-neutral-600" />
         </button>
         <button onClick={onLeaderboard} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 hover:bg-neutral-900 transition">
           <div className="flex items-center gap-3">
@@ -5131,130 +5203,57 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
           <ChevronRight className="w-4 h-4 text-neutral-600" />
         </button>
       </div>
-
-      <div className="space-y-3">
-        <div className="flex items-start gap-3 px-1">
-          <div className="w-8 h-8 rounded-full bg-violet-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Users className="w-3.5 h-3.5 text-violet-400" /></div>
-          <p className="text-xs text-neutral-500 leading-relaxed">
-            <span className="text-neutral-300 font-medium">Referrals:</span> earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
-          </p>
-        </div>
-        <div className="flex items-start gap-3 px-1">
-          <div className="w-8 h-8 rounded-full bg-teal-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Sparkles className="w-3.5 h-3.5 text-teal-400" /></div>
-          <p className="text-xs text-neutral-500 leading-relaxed">
-            <span className="text-neutral-300 font-medium">Cashback:</span> earn 1% back on every airtime, data, electricity, or TV bill you pay for through Tranxact.
-          </p>
-        </div>
-      </div>
     </div>
   );
 }
 
 
-function ReferralEarningsScreen({ onBack, userId, onWithdrawn }) {
+function ReferralEarningsScreen({ onBack, userId }) {
   const [earnings, setEarnings] = useState(null);
-  const [withdrawing, setWithdrawing] = useState(false);
-  const [withdrawn, setWithdrawn] = useState(false);
-  const [error, setError] = useState('');
 
-  const load = async () => {
-    const { data } = await getReferralEarnings(userId);
-    setEarnings(data || []);
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const pending = (earnings || []).filter(e => e.status === 'pending');
-  const referralBalance = pending.filter(e => e.type !== 'cashback').reduce((s, e) => s + Number(e.amount), 0);
-  const cashbackBalance = pending.filter(e => e.type === 'cashback').reduce((s, e) => s + Number(e.amount), 0);
-  const pendingBalance = referralBalance + cashbackBalance;
-
-  const handleWithdraw = async () => {
-    setError('');
-    setWithdrawing(true);
-    try {
-      await withdrawReferralEarnings();
-      setWithdrawn(true);
-      await load();
-      onWithdrawn?.();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setWithdrawing(false);
-    }
-  };
+  useEffect(() => {
+    getReferralEarnings(userId).then(({ data }) => setEarnings(data || []));
+  }, [userId]);
 
   return (
     <div>
       <BackHeader title="Earnings" onBack={onBack} />
-      <div
-        className="rounded-2xl p-6 text-center mb-4"
-        style={{ background: 'linear-gradient(145deg, #1E1B3A 0%, #0F2E26 100%)', border: '1px solid #2A2A30' }}
-      >
-        <p className="text-sm text-neutral-400 mb-2">Available balance</p>
-        {earnings === null ? (
-          <div className="flex justify-center py-2 mb-5"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
-        ) : (
-          <div className="font-mono text-3xl font-semibold mb-5">{fmtNaira(pendingBalance)}</div>
-        )}
-        {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
-        <PrimaryButton onClick={handleWithdraw} disabled={withdrawing || pendingBalance <= 0 || withdrawn}>
-          {withdrawing ? <Loader2 className="w-4 h-4 animate-spin" /> : withdrawn ? <><Check className="w-4 h-4" /> Withdrawn to wallet</> : 'Withdraw to Tranxact Wallet'}
-        </PrimaryButton>
-      </div>
-
-      {earnings !== null && (
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="w-2 h-2 rounded-full bg-violet-400" />
-              <span className="text-xs text-neutral-500">Referrals</span>
-            </div>
-            <div className="font-mono text-lg font-semibold">{fmtNaira(referralBalance)}</div>
-          </div>
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="w-2 h-2 rounded-full bg-teal-400" />
-              <span className="text-xs text-neutral-500">Cashback</span>
-            </div>
-            <div className="font-mono text-lg font-semibold">{fmtNaira(cashbackBalance)}</div>
-          </div>
-        </div>
-      )}
-
-      {earnings && earnings.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-semibold mb-2">Recent activity</h2>
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
-            {earnings.slice(0, 10).map((e, i) => (
-              <div key={i} className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2.5">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${e.type === 'cashback' ? 'bg-teal-400' : 'bg-violet-400'}`} />
-                  <div>
-                    <div className="text-sm">{e.type === 'cashback' ? 'Bill cashback' : 'Referral bonus'}</div>
-                    <div className="text-[11px] text-neutral-600">{new Date(e.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="font-mono text-sm">{fmtNaira(Number(e.amount))}</div>
-                  <div className={`text-[10px] ${e.status === 'withdrawn' ? 'text-neutral-600' : 'text-emerald-400'}`}>{e.status === 'withdrawn' ? 'Withdrawn' : 'Pending'}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <h2 className="text-sm font-semibold mb-2">How it works</h2>
-      <div className="space-y-2.5">
+      <div className="space-y-2.5 mb-6">
         <p className="text-xs text-neutral-500">
-          <span className="text-neutral-300 font-medium">Referrals:</span> earn 25% of the crypto funding fee every time someone you referred receives crypto.
+          <span className="text-neutral-300 font-medium">Referrals:</span> earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
         </p>
         <p className="text-xs text-neutral-500">
           <span className="text-neutral-300 font-medium">Cashback:</span> earn 1% back on every airtime, data, electricity, or TV bill you pay for.
         </p>
-        <p className="text-xs text-neutral-600">Withdraw anytime to your main wallet balance.</p>
+        <p className="text-xs text-neutral-600">Withdraw anytime from the Earn tab.</p>
       </div>
+
+      <h2 className="text-sm font-semibold mb-2">Recent activity</h2>
+      {earnings === null ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-neutral-600" /></div>
+      ) : earnings.length === 0 ? (
+        <p className="text-xs text-neutral-600 py-4">Nothing yet — refer a friend or pay a bill to start earning.</p>
+      ) : (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+          {earnings.slice(0, 10).map((e, i) => (
+            <div key={i} className="flex items-center justify-between px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${e.type === 'cashback' ? 'bg-teal-400' : 'bg-violet-400'}`} />
+                <div>
+                  <div className="text-sm">{e.type === 'cashback' ? 'Bill cashback' : 'Referral bonus'}</div>
+                  <div className="text-[11px] text-neutral-600">{new Date(e.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}</div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-mono text-sm">{fmtNaira(Number(e.amount))}</div>
+                <div className={`text-[10px] ${e.status === 'withdrawn' ? 'text-neutral-600' : 'text-emerald-400'}`}>{e.status === 'withdrawn' ? 'Withdrawn' : 'Pending'}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -6233,7 +6232,7 @@ function MobileAppRoot() {
       {tab === 'home' && homeView === 'history' && (
         <HistoryScreen
           onBack={() => setHomeView('main')}
-          transactions={transactions}
+          userId={profile?.id}
           onSendAgain={(username) => { setSendAgainUsername(username); setHomeView('send'); }}
         />
       )}
@@ -6244,13 +6243,13 @@ function MobileAppRoot() {
           onLeaderboard={() => setEarnView('leaderboard')}
           username={profile?.username || ''}
           userId={profile?.id}
+          onWithdrawn={() => { if (profile?.id) loadUserData(profile.id); }}
         />
       )}
       {tab === 'earn' && earnView === 'earnings' && (
         <ReferralEarningsScreen
           onBack={() => setEarnView('main')}
           userId={profile?.id}
-          onWithdrawn={() => { if (profile?.id) loadUserData(profile.id); }}
         />
       )}
       {tab === 'earn' && earnView === 'leaderboard' && (
@@ -8375,12 +8374,13 @@ function EditItemScreen({ item, onBack, onSaved }) {
 }
 
 // The single real entry point. Decides which experience to render based on
-// which domain someone's actually on. pay.tranxact.co redirects straight
-// into the app — TranxactPay already lives there in full, so the separate
-// merchant dashboard has nothing unique left to offer; business.tranxact.co
-// is purely a public storefront viewer — no login, no dashboard, just what a
-// customer sees when they open a shared link or track a real order;
-// everything else gets the normal mobile-first app.
+// which domain someone's actually on. pay.tranxact.co is the real business
+// dashboard — the tool a business owner manages their storefront with once
+// they've actually joined, not something advertised directly on the landing
+// page; business.tranxact.co is the public storefront viewer — no login, no
+// dashboard, just what a customer sees when they open a shared link or track
+// a real order, and where a prospective business owner explores before
+// deciding to join; everything else gets the normal mobile-first app.
 export default function TranxactApp() {
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
@@ -8393,17 +8393,11 @@ export default function TranxactApp() {
   const isNativeApp = typeof window !== 'undefined' && Boolean(window.Capacitor?.isNativePlatform?.());
   if (isNativeApp) return <MobileAppRoot />;
 
-  // pay.tranxact.co no longer has its own experience — TranxactPay (create a
-  // link, view existing ones, get paid) already lives fully inside the app
-  // itself. WebDashboardApp and every Dashboard* screen underneath it are
-  // left untouched, just unreachable by normal navigation — nothing here is
-  // deleted, only this one routing branch changed.
-  if (hostname.startsWith('pay.')) {
-    if (typeof window !== 'undefined') {
-      window.location.href = `https://app.tranxact.co${pathname}${window.location.search}`;
-    }
-    return null;
-  }
+  // pay.tranxact.co is the real business dashboard again — it's not a
+  // marketing destination, it's the tool a business owner actually gets
+  // handed once they've decided to join, reached via business.tranxact.co,
+  // not advertised directly on the landing page.
+  if (hostname.startsWith('pay.')) return <WebDashboardApp />;
 
   if (hostname.startsWith('business.')) {
     const parts = pathname.replace(/^\//, '').split('/');
