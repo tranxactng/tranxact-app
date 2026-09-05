@@ -103,7 +103,7 @@ function mapTransaction(row) {
 
 const NAV = [
   { key: 'home', label: 'Home', icon: Home },
-  { key: 'rates', label: 'Rates', icon: LineChart },
+  { key: 'earn', label: 'Earn', icon: Sparkles },
   { key: 'crypto', label: 'Crypto', icon: Bitcoin },
   { key: 'cards', label: 'Cards', icon: CreditCard },
   { key: 'profile', label: 'Profile', icon: User },
@@ -2836,7 +2836,7 @@ function TranxactPayScreen({ onClose, username }) {
 }
 
 // ---------- Rates ----------
-function RatesScreen() {
+function RatesScreen({ onBack }) {
   const [tab, setTab] = useState('rates');
   const [rates, setRates] = useState(null);
   const [error, setError] = useState('');
@@ -2884,7 +2884,7 @@ function RatesScreen() {
 
   return (
     <div>
-      <h1 className="text-xl font-bold mb-4">Rates</h1>
+      <BackHeader title="Rates" onBack={onBack} />
 
       <TabToggle
         value={tab}
@@ -5006,12 +5006,12 @@ function SupportScreen({ onBack }) {
   );
 }
 
-function ProfileScreen({ onLogout, onOpenReferrals, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails }) {
+function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails }) {
   const [showVerification, setShowVerification] = useState(false);
   const items = [
     { label: 'Account details', icon: UserCircle, onClick: onOpenAccountDetails },
     { label: 'Username', icon: User, onClick: onOpenUsername },
-    { label: 'Referrals', icon: Users, onClick: onOpenReferrals },
+    { label: 'Rates', icon: LineChart, onClick: onOpenRates },
     { label: 'Verification', icon: ShieldCheck, badge: 'Verified', onClick: () => setShowVerification(true) },
     { label: 'Security', icon: Lock, onClick: onOpenSecurity },
     { label: 'Settings', icon: Settings, onClick: onOpenSettings },
@@ -5043,7 +5043,7 @@ function ProfileScreen({ onLogout, onOpenReferrals, onOpenSupport, onOpenUsernam
 }
 
 // ---------- Referrals ----------
-function ReferralsScreen({ onBack, onEarnings, onLeaderboard, username, userId }) {
+function EarnScreen({ onEarnings, onLeaderboard, username, userId }) {
   const [copied, setCopied] = useState(false);
   const [pendingBalance, setPendingBalance] = useState(null);
 
@@ -5055,7 +5055,9 @@ function ReferralsScreen({ onBack, onEarnings, onLeaderboard, username, userId }
   }, [userId]);
   return (
     <div>
-      <BackHeader title="Referrals" onBack={onBack} />
+      <h1 className="text-xl font-bold mb-1">Earn</h1>
+      <p className="text-sm text-neutral-500 mb-5">Every way to make Tranxact pay you back.</p>
+
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 mb-4 text-center">
         <p className="text-sm text-neutral-500 mb-2">Your referral code</p>
         <div className="font-mono text-2xl font-semibold mb-4">@{username || '—'}</div>
@@ -5080,7 +5082,8 @@ function ReferralsScreen({ onBack, onEarnings, onLeaderboard, username, userId }
           </GhostButton>
         </div>
       </div>
-      <div className="space-y-2">
+
+      <div className="space-y-2 mb-6">
         <button onClick={onEarnings} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 hover:bg-neutral-900 transition">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center"><Wallet className="w-4 h-4 text-violet-400" /></div>
@@ -5099,9 +5102,23 @@ function ReferralsScreen({ onBack, onEarnings, onLeaderboard, username, userId }
           <ChevronRight className="w-4 h-4 text-neutral-600" />
         </button>
       </div>
-      <p className="text-xs text-neutral-600 mt-6 text-center">
+      <p className="text-xs text-neutral-600 mb-6 text-center">
         You earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
       </p>
+
+      {/* Genuinely not live yet — no rate has been decided, no backend
+          crediting exists. Shown honestly as coming soon rather than as a
+          working feature, so nobody expects cashback that isn't real yet. */}
+      <div className="bg-neutral-950 border border-dashed border-neutral-800 rounded-2xl p-5">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-9 h-9 rounded-full bg-teal-500/15 flex items-center justify-center flex-shrink-0"><Sparkles className="w-4 h-4 text-teal-400" /></div>
+          <span className="text-sm font-semibold">Cashback Rewards</span>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 ml-auto">Coming soon</span>
+        </div>
+        <p className="text-xs text-neutral-500 leading-relaxed">
+          Earn a little back on the things you already pay for, bills, transfers, and more, on top of what referrals bring in.
+        </p>
+      </div>
     </div>
   );
 }
@@ -5958,7 +5975,8 @@ function MobileAppRoot() {
   const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | notifications
   const [sendAgainUsername, setSendAgainUsername] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
-  const [profileView, setProfileView] = useState('main'); // main | referrals | earnings | leaderboard | support | username | security | settings | account
+  const [profileView, setProfileView] = useState('main'); // main | rates | support | username | security | settings | account
+  const [earnView, setEarnView] = useState('main'); // main | earnings | leaderboard
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [tpOpen, setTpOpen] = useState(false);
   const [profile, setProfile] = useState(null);
@@ -6139,7 +6157,24 @@ function MobileAppRoot() {
         />
       )}
 
-      {tab === 'rates' && <RatesScreen />}
+      {tab === 'earn' && earnView === 'main' && (
+        <EarnScreen
+          onEarnings={() => setEarnView('earnings')}
+          onLeaderboard={() => setEarnView('leaderboard')}
+          username={profile?.username || ''}
+          userId={profile?.id}
+        />
+      )}
+      {tab === 'earn' && earnView === 'earnings' && (
+        <ReferralEarningsScreen
+          onBack={() => setEarnView('main')}
+          userId={profile?.id}
+          onWithdrawn={() => { if (profile?.id) loadUserData(profile.id); }}
+        />
+      )}
+      {tab === 'earn' && earnView === 'leaderboard' && (
+        <LeaderboardScreen onBack={() => setEarnView('main')} myUsername={profile?.username || ''} />
+      )}
       {tab === 'crypto' && <CryptoScreen />}
       {tab === 'cards' && <CardsScreen fullName={profile?.full_name || ''} />}
       {tab === 'admin' && profile?.is_admin === true && <AdminScreen />}
@@ -6147,7 +6182,7 @@ function MobileAppRoot() {
       {tab === 'profile' && profileView === 'main' && (
         <ProfileScreen
           onLogout={handleLogout}
-          onOpenReferrals={() => setProfileView('referrals')}
+          onOpenRates={() => setProfileView('rates')}
           onOpenSupport={() => setProfileView('support')}
           onOpenUsername={() => setProfileView('username')}
           onOpenSecurity={() => setProfileView('security')}
@@ -6155,24 +6190,8 @@ function MobileAppRoot() {
           onOpenAccountDetails={() => setProfileView('account')}
         />
       )}
-      {tab === 'profile' && profileView === 'referrals' && (
-        <ReferralsScreen
-          onBack={() => setProfileView('main')}
-          onEarnings={() => setProfileView('earnings')}
-          onLeaderboard={() => setProfileView('leaderboard')}
-          username={profile?.username || ''}
-          userId={profile?.id}
-        />
-      )}
-      {tab === 'profile' && profileView === 'earnings' && (
-        <ReferralEarningsScreen
-          onBack={() => setProfileView('referrals')}
-          userId={profile?.id}
-          onWithdrawn={() => { if (profile?.id) loadUserData(profile.id); }}
-        />
-      )}
-      {tab === 'profile' && profileView === 'leaderboard' && (
-        <LeaderboardScreen onBack={() => setProfileView('referrals')} myUsername={profile?.username || ''} />
+      {tab === 'profile' && profileView === 'rates' && (
+        <RatesScreen onBack={() => setProfileView('main')} />
       )}
       {tab === 'profile' && profileView === 'support' && <SupportScreen onBack={() => setProfileView('main')} />}
       {tab === 'profile' && profileView === 'account' && <AccountDetailsScreen onBack={() => setProfileView('main')} profile={profile} onUpdated={() => { if (profile?.id) loadUserData(profile.id); }} />}
