@@ -414,6 +414,10 @@ export async function adminCheckBtcBalance(username) {
   return callAdminFunction('admin-check-btc-balance', { username });
 }
 
+export async function adminSweepBtc(action, username) {
+  return callAdminFunction('admin-sweep-btc', { action, username });
+}
+
 export async function adminCheckSolBalance(username, asset) {
   return callAdminFunction('admin-check-sol-balance', { username, asset });
 }
