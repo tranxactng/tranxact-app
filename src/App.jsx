@@ -10,7 +10,7 @@ import {
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, getTransactionsForMonth, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
-  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminCheckBtcBalance, adminCheckSolBalance,
+  adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminCheckBtcBalance, adminSweepBtc, adminCheckSolBalance,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
   changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
@@ -3133,6 +3133,8 @@ function AdminScreen() {
   const [btcChecking, setBtcChecking] = useState(false);
   const [btcResult, setBtcResult] = useState(null);
   const [btcError, setBtcError] = useState('');
+  const [btcSweeping, setBtcSweeping] = useState(false);
+  const [btcConfirmingSweep, setBtcConfirmingSweep] = useState(false);
   const [solUsername, setSolUsername] = useState('');
   const [solAsset, setSolAsset] = useState('SOL');
   const [solChecking, setSolChecking] = useState(false);
@@ -3265,14 +3267,29 @@ function AdminScreen() {
   const checkBtcBalance = async () => {
     setBtcError('');
     setBtcResult(null);
+    setBtcConfirmingSweep(false);
     setBtcChecking(true);
     try {
-      const res = await adminCheckBtcBalance(btcUsername.trim().toLowerCase().replace(/^@/, ''));
+      const res = await adminSweepBtc('check_balance', btcUsername.trim().toLowerCase().replace(/^@/, ''));
       setBtcResult(res);
     } catch (e) {
       setBtcError(e.message);
     } finally {
       setBtcChecking(false);
+    }
+  };
+
+  const executeBtcSweep = async () => {
+    setBtcError('');
+    setBtcSweeping(true);
+    try {
+      const res = await adminSweepBtc('sweep', btcUsername.trim().toLowerCase().replace(/^@/, ''));
+      setBtcResult({ ...btcResult, swept: true, tx_hash: res.tx_hash, swept_amount: res.amount });
+      setBtcConfirmingSweep(false);
+    } catch (e) {
+      setBtcError(e.message);
+    } finally {
+      setBtcSweeping(false);
     }
   };
 
@@ -3470,6 +3487,48 @@ function AdminScreen() {
         ))}
       </div>
 
+      {/* Lives outside every tab conditional on purpose — both Payment and
+          Crypto Settling need a selected user for their Settle button to
+          enable, but this used to be trapped inside Overview only, meaning
+          switching straight to Crypto Settling left no way to ever satisfy
+          that requirement. This is now one persistent step, not three. */}
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-4">
+        <div className="text-xs text-neutral-500 mb-2">Find user</div>
+        <div className="flex gap-2">
+          <input
+            value={searchUsername}
+            onChange={e => setSearchUsername(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleLookup(); }}
+            placeholder="username"
+            className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm flex-1 outline-none text-white placeholder-neutral-600"
+          />
+          <button onClick={handleLookup} disabled={lookupLoading} className="bg-white text-black rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-50 flex-shrink-0">
+            {lookupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Find'}
+          </button>
+        </div>
+        {lookupError && <p className="text-sm text-red-400 mt-3">{lookupError}</p>}
+        {lookupResult && (
+          <div className="mt-4 bg-neutral-900 border border-neutral-800 rounded-xl p-4">
+            <div className="flex justify-between items-center mb-2">
+              <span className="font-semibold">@{lookupResult.username}</span>
+              <span className="font-mono text-sm">{fmtNaira(lookupResult.balance)}</span>
+            </div>
+            {lookupResult.recent_transactions?.length > 0 && (
+              <div className="mt-3 space-y-2 pt-3 border-t border-neutral-800">
+                {lookupResult.recent_transactions.map((t, i) => (
+                  <div key={i} className="flex justify-between text-xs text-neutral-500">
+                    <span>{t.type}{t.crypto_asset ? ` (${t.crypto_asset})` : ''}</span>
+                    <span className={Number(t.amount) >= 0 ? 'text-emerald-400' : 'text-neutral-300'}>
+                      {Number(t.amount) >= 0 ? '+' : ''}{fmtNaira(t.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {adminTab === 'overview' && (
       <>
       {stats && (
@@ -3511,43 +3570,6 @@ function AdminScreen() {
           </div>
         </div>
       )}
-
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
-        <div className="text-xs text-neutral-500 mb-2">Find user</div>
-        <div className="flex gap-2">
-          <input
-            value={searchUsername}
-            onChange={e => setSearchUsername(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleLookup(); }}
-            placeholder="username"
-            className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm flex-1 outline-none text-white placeholder-neutral-600"
-          />
-          <button onClick={handleLookup} disabled={lookupLoading} className="bg-white text-black rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-50 flex-shrink-0">
-            {lookupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Find'}
-          </button>
-        </div>
-        {lookupError && <p className="text-sm text-red-400 mt-3">{lookupError}</p>}
-        {lookupResult && (
-          <div className="mt-4 bg-neutral-900 border border-neutral-800 rounded-xl p-4">
-            <div className="flex justify-between items-center mb-2">
-              <span className="font-semibold">@{lookupResult.username}</span>
-              <span className="font-mono text-sm">{fmtNaira(lookupResult.balance)}</span>
-            </div>
-            {lookupResult.recent_transactions?.length > 0 && (
-              <div className="mt-3 space-y-2 pt-3 border-t border-neutral-800">
-                {lookupResult.recent_transactions.map((t, i) => (
-                  <div key={i} className="flex justify-between text-xs text-neutral-500">
-                    <span>{t.type}{t.crypto_asset ? ` (${t.crypto_asset})` : ''}</span>
-                    <span className={Number(t.amount) >= 0 ? 'text-emerald-400' : 'text-neutral-300'}>
-                      {Number(t.amount) >= 0 ? '+' : ''}{fmtNaira(t.amount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
       </>
       )}
 
@@ -4091,12 +4113,12 @@ function AdminScreen() {
       </div>
 
       <div>
-        <h2 className="text-sm font-semibold mb-1">Bitcoin Balance Check (read-only)</h2>
-        <p className="text-xs text-neutral-500 mb-3">Confirms what's actually on a real BTC address. Sweeping isn't built for Bitcoin yet.</p>
+        <h2 className="text-sm font-semibold mb-1">Bitcoin Sweep</h2>
+        <p className="text-xs text-neutral-500 mb-3">Real UTXO sweep, network fee estimated live from the actual mempool. No change output — full balance minus fee, straight to treasury.</p>
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
           <input
             value={btcUsername}
-            onChange={e => { setBtcUsername(e.target.value); setBtcResult(null); setBtcError(''); }}
+            onChange={e => { setBtcUsername(e.target.value); setBtcResult(null); setBtcError(''); setBtcConfirmingSweep(false); }}
             placeholder="username"
             className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-violet-500 mb-3"
           />
@@ -4108,11 +4130,42 @@ function AdminScreen() {
             <div className="mt-3 bg-black/40 border border-neutral-800 rounded-lg p-3 space-y-1.5">
               <div className="text-[11px] text-neutral-500">Address</div>
               <div className="text-xs font-mono break-all mb-2">{btcResult.address}</div>
-              <div className="text-xs">Confirmed: <span className="font-mono">{btcResult.confirmed_balance_btc} BTC</span></div>
-              {Number(btcResult.unconfirmed_balance_btc) !== 0 && (
-                <div className="text-xs">Unconfirmed: <span className="font-mono">{btcResult.unconfirmed_balance_btc} BTC</span></div>
+              {btcResult.swept ? (
+                <>
+                  <div className="text-xs text-emerald-400">Swept {btcResult.swept_amount} BTC</div>
+                  <div className="text-[11px] text-neutral-500 font-mono break-all mt-1">{btcResult.tx_hash}</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-xs">Confirmed: <span className="font-mono">{btcResult.confirmed_balance_btc} BTC</span></div>
+                  <div className="text-xs text-neutral-500">{btcResult.utxo_count} unspent output{btcResult.utxo_count === 1 ? '' : 's'}</div>
+                  {btcResult.estimated_fee_btc && (
+                    <div className="text-xs text-neutral-500">Est. network fee: <span className="font-mono">{btcResult.estimated_fee_btc} BTC</span> ({btcResult.fee_rate_sat_vb} sat/vB)</div>
+                  )}
+                  {btcResult.sweepable_btc !== undefined && <div className="text-xs">Sweepable: <span className="font-mono text-emerald-400">{btcResult.sweepable_btc} BTC</span></div>}
+                  {(() => {
+                    const sweepableAmount = Number(btcResult.sweepable_btc || 0);
+                    if (!(sweepableAmount > 0)) {
+                      return <p className="text-xs text-neutral-600 mt-3">Nothing to sweep, balance too low to cover the network fee.</p>;
+                    }
+                    return !btcConfirmingSweep ? (
+                      <button onClick={() => setBtcConfirmingSweep(true)} className="w-full bg-amber-500/15 border border-amber-500/40 text-amber-400 rounded-lg py-2 text-xs font-semibold mt-3">
+                        Sweep to Treasury
+                      </button>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-xs text-amber-300">This broadcasts a real Bitcoin transaction. Continue?</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button onClick={() => setBtcConfirmingSweep(false)} className="bg-neutral-800 rounded-lg py-2 text-xs">Cancel</button>
+                          <button onClick={executeBtcSweep} disabled={btcSweeping} className="bg-amber-500 text-black rounded-lg py-2 text-xs font-semibold disabled:opacity-50">
+                            {btcSweeping ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : 'Yes, sweep it'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
               )}
-              <div className="text-xs text-neutral-500">{btcResult.utxo_count} unspent output{btcResult.utxo_count === 1 ? '' : 's'}</div>
             </div>
           )}
         </div>
@@ -5202,6 +5255,25 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId, onWithdrawn }
           </div>
           <ChevronRight className="w-4 h-4 text-neutral-600" />
         </button>
+      </div>
+
+      {/* Visible the moment Earn opens — this was hidden a tap deep before,
+          inside Earnings, which meant a first-time visitor had no idea how
+          any of this actually worked without digging for it. */}
+      <div className="mt-6 space-y-3">
+        <h2 className="text-sm font-semibold px-1">How it works</h2>
+        <div className="flex items-start gap-3 px-1">
+          <div className="w-8 h-8 rounded-full bg-violet-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Users className="w-3.5 h-3.5 text-violet-400" /></div>
+          <p className="text-xs text-neutral-500 leading-relaxed">
+            <span className="text-neutral-300 font-medium">Referrals:</span> earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
+          </p>
+        </div>
+        <div className="flex items-start gap-3 px-1">
+          <div className="w-8 h-8 rounded-full bg-teal-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Sparkles className="w-3.5 h-3.5 text-teal-400" /></div>
+          <p className="text-xs text-neutral-500 leading-relaxed">
+            <span className="text-neutral-300 font-medium">Cashback:</span> earn 1% back on every airtime, data, electricity, or TV bill you pay for through Tranxact.
+          </p>
+        </div>
       </div>
     </div>
   );
