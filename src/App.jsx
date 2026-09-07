@@ -3541,6 +3541,7 @@ function AdminScreen() {
           { key: 'crypto', label: 'Crypto Settling' },
           { key: 'sweeping', label: 'Sweeping' },
           { key: 'transactions', label: 'Transactions' },
+          { key: 'notifications', label: 'Notifications' },
           { key: 'other', label: 'Other' },
         ].map(t => (
           <button
@@ -3553,11 +3554,11 @@ function AdminScreen() {
         ))}
       </div>
 
-      {/* Lives outside every tab conditional on purpose — both Payment and
-          Crypto Settling need a selected user for their Settle button to
-          enable, but this used to be trapped inside Overview only, meaning
-          switching straight to Crypto Settling left no way to ever satisfy
-          that requirement. This is now one persistent step, not three. */}
+      {/* Scoped to exactly where a user actually needs to be searched for —
+          settling a payment, or messaging someone specific. Previously
+          showed on every tab including Sweeping and Transactions, where
+          it had nothing to do with the task at hand. */}
+      {(adminTab === 'overview' || adminTab === 'payment' || adminTab === 'crypto' || adminTab === 'notifications') && (
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-4">
         <div className="text-xs text-neutral-500 mb-2">Find user</div>
         <div className="flex gap-2">
@@ -3595,10 +3596,11 @@ function AdminScreen() {
           </div>
         )}
       </div>
+      )}
 
-      {/* One compose box, two destinations — a specific looked-up user, or
-          everyone. Broadcasting needs an explicit confirm step since it
-          can't be undone once it's gone out. */}
+      {/* Its own tab now — was riding along on every settle screen, where
+          it had nothing to do with settling a payment. */}
+      {adminTab === 'notifications' && (
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-4">
         <div className="text-xs text-neutral-500 mb-2">Message users</div>
         <div className="space-y-2.5">
@@ -3698,6 +3700,7 @@ function AdminScreen() {
           <button onClick={() => setConfirmingBroadcast(null)} className="w-full text-xs text-neutral-500 mt-2">Cancel</button>
         )}
       </div>
+      )}
 
       {adminTab === 'overview' && (
       <>
