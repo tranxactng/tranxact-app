@@ -328,6 +328,25 @@ export async function adminLookupUser(username) {
   return callAdminFunction('admin-lookup', { action: 'lookup_user', username });
 }
 
+// Reuses send-email's own 'custom' type directly — an admin session is
+// already an accepted caller there, no separate function needed for this.
+export async function adminSendCustomEmail(to, heading, message, ctaLabel, ctaUrl) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ type: 'custom', to, data: { heading, body: message, subject: heading, cta_label: ctaLabel || undefined, cta_url: ctaUrl || undefined } }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to send');
+  return data;
+}
+
+export async function adminBroadcastEmail(heading, message, ctaLabel, ctaUrl, target = 'users') {
+  return callAdminFunction('broadcast-email', { heading, message, cta_label: ctaLabel, cta_url: ctaUrl, target });
+}
+
 export async function adminRecentSettlements() {
   return callAdminFunction('admin-lookup', { action: 'recent_settlements' });
 }
@@ -789,6 +808,42 @@ export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_am
     throw err;
   }
   return data; // { success, notice_id, reference, deduplicated? }
+}
+
+// Read-only status for the Settings screen — separate function from
+// anything that actually gates a transaction, so it can never accidentally
+// affect enforcement.
+export async function getKycInfo(userId) {
+  const { data, error } = await supabase.rpc('get_kyc_info', { p_user_id: userId });
+  return { data, error };
+}
+
+// Reveals the real NIN only after a fresh PIN check, matching the same
+// pattern already used for revealing a crypto private key.
+export async function revealNin(pin) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/reveal-nin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ pin }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to reveal NIN');
+  return data;
+}
+
+export async function submitNin(nin, ninName, pin) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/submit-nin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ nin, nin_name: ninName, pin }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to submit NIN');
+  return data;
 }
 
 // §38 — pause or resume the whole storefront. Existing orders stay intact.
