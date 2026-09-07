@@ -20,7 +20,8 @@ import {
   isBusinessSlugAvailable, createBusiness, getMyBusiness, updateBusiness, getMyBusinessProducts, getBusinessStorefront, uploadBusinessAsset,
   requestWithdrawal, getMyWithdrawals, submitSalesLead, getDashboardAnalytics, notifyCopyEvent,
   listPaystackBanks, resolveBankAccount,
-  getMyNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead
+  getMyNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead,
+  getKycInfo, submitNin, revealNin, adminSendCustomEmail, adminBroadcastEmail
 } from './lib/supabase.js';
 
 // ---------- Demo data ----------
@@ -2557,6 +2558,21 @@ function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
     );
   }
 
+  // Client-side preview only, mirroring the server's real tiers exactly —
+  // the backend remains the authoritative calculation, this just avoids a
+  // surprise between what's shown here and what actually gets charged.
+  // Mirrors the backend's real, complete fee schedule exactly — covers both
+  // Paystack's actual cost and Tranxact's margin in one number per tier.
+  const withdrawalFee = (() => {
+    if (mode !== 'bank') return 0;
+    const amt = Number(amount) || 0;
+    if (amt <= 0) return 0;
+    if (amt <= 5000) return 25;
+    if (amt <= 9999) return 50;
+    if (amt <= 50000) return 100;
+    return 150;
+  })();
+
   if (step === 'confirm') {
     return (
       <div>
@@ -2565,7 +2581,13 @@ function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Recipient</span><span>{recipientLabel}</span></div>
           {mode === 'bank' && <div className="flex justify-between text-sm"><span className="text-neutral-500">Bank</span><span>{selectedBank?.name}</span></div>}
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(Number(amount) || 0)}</span></div>
-          <div className="flex justify-between text-sm"><span className="text-neutral-500">Fee</span><span className="font-mono">₦0.00</span></div>
+          <div className="flex justify-between text-sm"><span className="text-neutral-500">Fee</span><span className="font-mono">{fmtNaira(withdrawalFee)}</span></div>
+          {mode === 'bank' && (
+            <div className="flex justify-between text-sm pt-3 border-t border-neutral-800">
+              <span className="text-neutral-300 font-medium">Total from wallet</span>
+              <span className="font-mono font-semibold">{fmtNaira((Number(amount) || 0) + withdrawalFee)}</span>
+            </div>
+          )}
         </div>
         {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
         <PrimaryButton onClick={handleConfirm} disabled={loading}>
@@ -3073,6 +3095,16 @@ function AdminScreen() {
   const [lookupError, setLookupError] = useState('');
   const [lookupLoading, setLookupLoading] = useState(false);
 
+  const [msgHeading, setMsgHeading] = useState('');
+  const [msgBody, setMsgBody] = useState('');
+  const [msgCtaLabel, setMsgCtaLabel] = useState('');
+  const [msgCtaUrl, setMsgCtaUrl] = useState('');
+  const [rawEmail, setRawEmail] = useState('');
+  const [msgSending, setMsgSending] = useState(false);
+  const [msgResult, setMsgResult] = useState(null);
+  const [msgError, setMsgError] = useState('');
+  const [confirmingBroadcast, setConfirmingBroadcast] = useState(null); // null | 'users' | 'waitlist'
+
   const [settleType, setSettleType] = useState('crypto_deposit');
   const [cryptoAsset, setCryptoAsset] = useState('ETH');
   const [amountUsd, setAmountUsd] = useState('');
@@ -3403,6 +3435,40 @@ function AdminScreen() {
     }
   };
 
+  const handleSendToUser = async () => {
+    setMsgError('');
+    setMsgResult(null);
+    const target = rawEmail.trim() || lookupResult?.email;
+    if (!target) { setMsgError('Find a user, or type an email address directly'); return; }
+    if (rawEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail.trim())) { setMsgError('Enter a valid email address'); return; }
+    if (!msgHeading.trim() || !msgBody.trim()) { setMsgError('Heading and message are required'); return; }
+    setMsgSending(true);
+    try {
+      await adminSendCustomEmail(target, msgHeading, msgBody, msgCtaLabel, msgCtaUrl);
+      setMsgResult({ type: 'single', to: rawEmail.trim() || `@${lookupResult.username}` });
+    } catch (e) {
+      setMsgError(e.message);
+    } finally {
+      setMsgSending(false);
+    }
+  };
+
+  const handleBroadcast = async (target) => {
+    setMsgError('');
+    setMsgResult(null);
+    if (!msgHeading.trim() || !msgBody.trim()) { setMsgError('Heading and message are required'); return; }
+    setMsgSending(true);
+    try {
+      const res = await adminBroadcastEmail(msgHeading, msgBody, msgCtaLabel, msgCtaUrl, target);
+      setMsgResult({ type: 'broadcast', target: res.target, sent: res.sent, total: res.total, failed: res.failed });
+      setConfirmingBroadcast(null);
+    } catch (e) {
+      setMsgError(e.message);
+    } finally {
+      setMsgSending(false);
+    }
+  };
+
   const handleSettle = async () => {
     setSettleError('');
     setSettleSuccess(null);
@@ -3513,6 +3579,7 @@ function AdminScreen() {
               <span className="font-semibold">@{lookupResult.username}</span>
               <span className="font-mono text-sm">{fmtNaira(lookupResult.balance)}</span>
             </div>
+            {lookupResult.email && <div className="text-xs text-neutral-500 mb-2">{lookupResult.email}</div>}
             {lookupResult.recent_transactions?.length > 0 && (
               <div className="mt-3 space-y-2 pt-3 border-t border-neutral-800">
                 {lookupResult.recent_transactions.map((t, i) => (
@@ -3526,6 +3593,109 @@ function AdminScreen() {
               </div>
             )}
           </div>
+        )}
+      </div>
+
+      {/* One compose box, two destinations — a specific looked-up user, or
+          everyone. Broadcasting needs an explicit confirm step since it
+          can't be undone once it's gone out. */}
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-4">
+        <div className="text-xs text-neutral-500 mb-2">Message users</div>
+        <div className="space-y-2.5">
+          <input
+            value={msgHeading}
+            onChange={e => { setMsgHeading(e.target.value); setMsgResult(null); setMsgError(''); }}
+            placeholder="Heading"
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm outline-none text-white placeholder-neutral-600"
+          />
+          <textarea
+            value={msgBody}
+            onChange={e => { setMsgBody(e.target.value); setMsgResult(null); setMsgError(''); }}
+            placeholder="Message"
+            rows={3}
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm outline-none text-white placeholder-neutral-600 resize-none"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={msgCtaLabel}
+              onChange={e => setMsgCtaLabel(e.target.value)}
+              placeholder="Button text (optional)"
+              className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm outline-none text-white placeholder-neutral-600"
+            />
+            <input
+              value={msgCtaUrl}
+              onChange={e => setMsgCtaUrl(e.target.value)}
+              placeholder="Button link (optional)"
+              className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm outline-none text-white placeholder-neutral-600"
+            />
+          </div>
+        </div>
+
+        {msgError && <p className="text-sm text-red-400 mt-3">{msgError}</p>}
+        {msgResult?.type === 'single' && <p className="text-sm text-emerald-400 mt-3">Sent to {msgResult.to}</p>}
+        {msgResult?.type === 'broadcast' && (
+          <p className="text-sm text-emerald-400 mt-3">
+            Sent to {msgResult.sent} of {msgResult.total} {msgResult.target === 'waitlist' ? 'waitlist signups' : 'users'}{msgResult.failed > 0 ? ` (${msgResult.failed} failed)` : ''}
+          </p>
+        )}
+
+        {/* One person: either someone already looked up above, or any raw
+            email at all — including waitlist signups, who have no account
+            and so can never be reached via username lookup. */}
+        <div className="mt-3 pt-3 border-t border-neutral-800">
+          <input
+            value={rawEmail}
+            onChange={e => { setRawEmail(e.target.value); setMsgResult(null); setMsgError(''); }}
+            placeholder="Or type any email directly"
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm outline-none text-white placeholder-neutral-600 mb-2"
+          />
+          <button
+            onClick={handleSendToUser}
+            disabled={msgSending || (!lookupResult?.email && !rawEmail.trim())}
+            className="w-full bg-neutral-800 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40"
+          >
+            {msgSending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : rawEmail.trim() ? `Send to ${rawEmail.trim()}` : lookupResult ? `Send to @${lookupResult.username}` : 'Send to one person'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-neutral-800">
+          {confirmingBroadcast !== 'users' ? (
+            <button
+              onClick={() => setConfirmingBroadcast('users')}
+              disabled={msgSending}
+              className="bg-amber-500/15 border border-amber-500/40 text-amber-400 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40"
+            >
+              Send to Everyone
+            </button>
+          ) : (
+            <button
+              onClick={() => handleBroadcast('users')}
+              disabled={msgSending}
+              className="bg-amber-500 text-black rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50"
+            >
+              {msgSending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Confirm: send to everyone'}
+            </button>
+          )}
+          {confirmingBroadcast !== 'waitlist' ? (
+            <button
+              onClick={() => setConfirmingBroadcast('waitlist')}
+              disabled={msgSending}
+              className="bg-violet-500/15 border border-violet-500/40 text-violet-400 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40"
+            >
+              Send to Waitlist
+            </button>
+          ) : (
+            <button
+              onClick={() => handleBroadcast('waitlist')}
+              disabled={msgSending}
+              className="bg-violet-500 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50"
+            >
+              {msgSending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Confirm: send to waitlist'}
+            </button>
+          )}
+        </div>
+        {confirmingBroadcast && !msgSending && (
+          <button onClick={() => setConfirmingBroadcast(null)} className="w-full text-xs text-neutral-500 mt-2">Cancel</button>
         )}
       </div>
 
@@ -5053,17 +5223,191 @@ function CheckoutPage({ slug }) {
   );
 }
 
-function VerificationModal({ onClose }) {
+function VerificationModal({ onClose, userId }) {
+  const [info, setInfo] = useState(null); // null = loading
+  const [step, setStep] = useState('status'); // status | submit-form | submit-pin | reveal-pin | revealed
+  const [nin, setNin] = useState('');
+  const [ninName, setNinName] = useState('');
+  const [pin, setPin] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [revealedNin, setRevealedNin] = useState('');
+
+  const load = () => { getKycInfo(userId).then(({ data }) => setInfo(data)); };
+  useEffect(() => { load(); }, [userId]);
+
+  const handleSubmitNin = async () => {
+    setError('');
+    if (!/^\d{11}$/.test(nin)) { setError('NIN must be exactly 11 digits'); return; }
+    if (ninName.trim().length < 3) { setError('Enter your full name as it appears on your NIN'); return; }
+    setStep('submit-pin');
+  };
+
+  const handleConfirmSubmit = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await submitNin(nin, ninName, pin);
+      setPin('');
+      load();
+      setStep('status');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReveal = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const res = await revealNin(pin);
+      setRevealedNin(res.nin);
+      setPin('');
+      setStep('revealed');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const maskedNin = (real) => real ? `•••••••${real.slice(-4)}` : '';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 text-center">
-        <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
-          <ShieldCheck className="w-6 h-6 text-emerald-400" />
-        </div>
-        <h2 className="text-lg font-bold mb-1">You are verified</h2>
-        <p className="text-sm text-neutral-500 mb-6">Your account is in good standing.</p>
-        <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+      <div className="relative w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6">
+        {info === null ? (
+          <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-neutral-600" /></div>
+
+        ) : step === 'status' && (info.kyc_status === 'submitted' || info.kyc_status === 'verified') ? (
+          // Verified or submitted: shows like normal, no limit warnings at all.
+          <div className="text-center">
+            <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
+              <ShieldCheck className="w-6 h-6 text-emerald-400" />
+            </div>
+            <h2 className="text-lg font-bold mb-1">You're verified</h2>
+            <p className="text-sm text-neutral-500 mb-6">Your account is in good standing. No transaction limits apply.</p>
+            {info.has_nin && (
+              <button onClick={() => setStep('reveal-pin')} className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 mb-5 text-left">
+                <span className="text-sm text-neutral-400">NIN on file</span>
+                <span className="text-sm font-mono">•••••••••••</span>
+              </button>
+            )}
+            <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+          </div>
+
+        ) : step === 'status' && info.kyc_status === 'restricted' ? (
+          <div className="text-center">
+            <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-4">
+              <ShieldCheck className="w-6 h-6 text-red-400" />
+            </div>
+            <h2 className="text-lg font-bold mb-1">Account restricted</h2>
+            <p className="text-sm text-neutral-500 mb-6">The name on your NIN didn't match your account name. Contact support to resolve this.</p>
+            <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+          </div>
+
+        ) : step === 'status' ? (
+          // unverified: real limit info, real prompt to submit NIN and lift it.
+          <div>
+            <div className="text-center mb-5">
+              <div className="w-14 h-14 rounded-full bg-amber-500/15 flex items-center justify-center mx-auto mb-4">
+                <ShieldCheck className="w-6 h-6 text-amber-400" />
+              </div>
+              <h2 className="text-lg font-bold mb-1">Not yet verified</h2>
+              <p className="text-sm text-neutral-500">Add your NIN to remove your transaction limit.</p>
+            </div>
+
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 mb-5">
+              <div className="flex justify-between text-xs text-neutral-500 mb-2">
+                <span>Lifetime limit</span>
+                <span>{fmtNaira(info.limit_used)} of {fmtNaira(info.limit_cap)}</span>
+              </div>
+              <div className="h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-amber-400 rounded-full"
+                  style={{ width: `${Math.min(100, (info.limit_used / info.limit_cap) * 100)}%` }}
+                />
+              </div>
+              <div className="text-xs text-neutral-500 mt-2">{fmtNaira(info.limit_remaining)} remaining until verified</div>
+            </div>
+
+            <PrimaryButton onClick={() => setStep('submit-form')}>Add your NIN</PrimaryButton>
+            <button onClick={onClose} className="w-full text-sm text-neutral-500 py-3">Not now</button>
+          </div>
+
+        ) : step === 'submit-form' ? (
+          <div>
+            <h2 className="text-lg font-bold mb-1">Add your NIN</h2>
+            <p className="text-sm text-neutral-500 mb-5">The name below must match your NIN exactly, or your account will be restricted.</p>
+            <div className="space-y-3">
+              <Field
+                label="NIN"
+                inputMode="numeric"
+                value={nin}
+                onChange={e => setNin(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                placeholder="11-digit National Identity Number"
+              />
+              <Field
+                label="Full name (as on your NIN)"
+                value={ninName}
+                onChange={e => setNinName(e.target.value)}
+                placeholder="e.g. Jaffar Onimisi Bello"
+              />
+            </div>
+            {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
+            <PrimaryButton onClick={handleSubmitNin} className="mt-5">Continue</PrimaryButton>
+            <button onClick={() => setStep('status')} className="w-full text-sm text-neutral-500 py-3">Back</button>
+          </div>
+
+        ) : step === 'submit-pin' ? (
+          <div>
+            <h2 className="text-lg font-bold mb-1">Confirm with your PIN</h2>
+            <p className="text-sm text-neutral-500 mb-5">Enter your transaction PIN to submit your NIN.</p>
+            <Field
+              label="Transaction PIN"
+              type="password"
+              inputMode="numeric"
+              value={pin}
+              onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="••••"
+            />
+            {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
+            <PrimaryButton onClick={handleConfirmSubmit} disabled={loading || pin.length < 4} className="mt-5">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit'}
+            </PrimaryButton>
+            <button onClick={() => setStep('submit-form')} className="w-full text-sm text-neutral-500 py-3">Back</button>
+          </div>
+
+        ) : step === 'reveal-pin' ? (
+          <div>
+            <h2 className="text-lg font-bold mb-1">Enter your PIN</h2>
+            <p className="text-sm text-neutral-500 mb-5">Confirm your PIN to view your full NIN.</p>
+            <Field
+              label="Transaction PIN"
+              type="password"
+              inputMode="numeric"
+              value={pin}
+              onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="••••"
+            />
+            {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
+            <PrimaryButton onClick={handleReveal} disabled={loading || pin.length < 4} className="mt-5">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reveal'}
+            </PrimaryButton>
+            <button onClick={() => setStep('status')} className="w-full text-sm text-neutral-500 py-3">Back</button>
+          </div>
+
+        ) : step === 'revealed' ? (
+          <div className="text-center">
+            <p className="text-sm text-neutral-500 mb-2">Your NIN</p>
+            <div className="font-mono text-2xl font-semibold mb-6">{revealedNin}</div>
+            <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+          </div>
+
+        ) : null}
       </div>
     </div>
   );
@@ -5107,13 +5451,13 @@ function SupportScreen({ onBack }) {
   );
 }
 
-function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails }) {
+function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails, userId }) {
   const [showVerification, setShowVerification] = useState(false);
   const items = [
     { label: 'Account details', icon: UserCircle, onClick: onOpenAccountDetails },
     { label: 'Username', icon: User, onClick: onOpenUsername },
     { label: 'Rates', icon: LineChart, onClick: onOpenRates },
-    { label: 'Verification', icon: ShieldCheck, badge: 'Verified', onClick: () => setShowVerification(true) },
+    { label: 'Verification', icon: ShieldCheck, onClick: () => setShowVerification(true) },
     { label: 'Security', icon: Lock, onClick: onOpenSecurity },
     { label: 'Settings', icon: Settings, onClick: onOpenSettings },
     { label: 'Help & Support', icon: Smartphone, onClick: onOpenSupport },
@@ -5138,7 +5482,7 @@ function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, o
       <button onClick={onLogout} className="w-full flex items-center justify-center gap-2 text-red-400 text-sm font-medium py-3.5 hover:text-red-300 transition">
         <LogOut className="w-4 h-4" /> Log out
       </button>
-      {showVerification && <VerificationModal onClose={() => setShowVerification(false)} />}
+      {showVerification && <VerificationModal onClose={() => setShowVerification(false)} userId={userId} />}
     </div>
   );
 }
@@ -6340,6 +6684,7 @@ function MobileAppRoot() {
           onOpenSecurity={() => setProfileView('security')}
           onOpenSettings={() => setProfileView('settings')}
           onOpenAccountDetails={() => setProfileView('account')}
+          userId={profile?.id}
         />
       )}
       {tab === 'profile' && profileView === 'rates' && (
