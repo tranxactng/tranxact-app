@@ -558,6 +558,58 @@ function LoginScreen({ onLogin, goSignup, goForgot, isDashboard }) {
   );
 }
 
+
+function AuthConfirmScreen() {
+  const [status, setStatus] = useState('confirming');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    const run = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+      const tokenHash = params.get('token_hash') || hashParams.get('token_hash');
+      const type = params.get('type') || hashParams.get('type') || 'email';
+      const code = params.get('code');
+      try {
+        if (tokenHash) {
+          const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+          if (error) throw error;
+        } else if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        } else {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) throw new Error('This confirmation link is invalid or has expired.');
+        }
+        window.history.replaceState({}, document.title, '/');
+        setStatus('ok');
+        window.setTimeout(() => { window.location.replace('/'); }, 600);
+      } catch (e) {
+        setStatus('error');
+        setMessage(e.message || 'Could not confirm your email.');
+      }
+    };
+    run();
+  }, []);
+
+  return (
+    <AuthShell title={status === 'error' ? 'Link expired' : 'Confirming your email'} subtitle="">
+      {status === 'confirming' && (
+        <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>
+      )}
+      {status === 'ok' && (
+        <p className="text-neutral-400 text-sm">Email confirmed. Opening Tranxact…</p>
+      )}
+      {status === 'error' && (
+        <>
+          <p className="text-red-400 text-sm mb-8">{message}</p>
+          <PrimaryButton onClick={() => window.location.replace('/')}>Go to login</PrimaryButton>
+        </>
+      )}
+    </AuthShell>
+  );
+}
+
 function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   const [showPw, setShowPw] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -8868,6 +8920,12 @@ export default function TranxactApp() {
   // only dashboard or storefront experiences.
   const isNativeApp = typeof window !== 'undefined' && Boolean(window.Capacitor?.isNativePlatform?.());
   if (isNativeApp) return <MobileAppRoot />;
+
+  // Email confirm links must never hit the marketing site. Handle them on
+  // every app hostname before pay/business routing.
+  if (pathname.startsWith('/auth/confirm') || pathname.startsWith('/auth/callback')) {
+    return <AuthConfirmScreen />;
+  }
 
   // pay.tranxact.co is the real business dashboard again — it's not a
   // marketing destination, it's the tool a business owner actually gets

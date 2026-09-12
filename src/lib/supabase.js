@@ -5,11 +5,16 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+const APP_ORIGIN = 'https://app.tranxact.co';
+
 export async function signUp({ email, password, username, fullName, referralCode, businessName }) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { username, full_name: fullName, referral_code: referralCode || null, business_name: businessName || null } },
+    options: {
+      emailRedirectTo: `${APP_ORIGIN}/auth/confirm`,
+      data: { username, full_name: fullName, referral_code: referralCode || null, business_name: businessName || null },
+    },
   });
   return { data, error };
 }
