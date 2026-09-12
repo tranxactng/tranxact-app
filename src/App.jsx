@@ -6,7 +6,7 @@ import {
   UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar, Search
 } from 'lucide-react';
 import {
-  supabase, signUp, signIn, requestPasswordReset, signOut,
+  supabase, signUp, verifySignupOtp, resendSignupOtp, signIn, requestPasswordReset, signOut,
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, getTransactionsForMonth, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
@@ -569,6 +569,9 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [resending, setResending] = useState(false);
+  const [resendNote, setResendNote] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -583,13 +586,66 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
     onSignup();
   };
 
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    setError('');
+    setResendNote('');
+    const code = otp.replace(/\s/g, '');
+    if (code.length < 6) { setError('Enter the code from your email.'); return; }
+    setLoading(true);
+    const { data, error: err } = await verifySignupOtp(email, code);
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    if (data?.session) { onSignup(); return; }
+    goLogin();
+  };
+
+  const handleResend = async () => {
+    setError('');
+    setResendNote('');
+    setResending(true);
+    const { error: err } = await resendSignupOtp(email);
+    setResending(false);
+    if (err) { setError(err.message); return; }
+    setResendNote('A new code has been sent.');
+  };
+
   if (needsConfirmation) {
     return (
-      <AuthShell title="Check your email" subtitle="" brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
-        <p className="text-neutral-400 text-sm mb-8">
-          We've sent a confirmation link to {email}. Verify your email, then log in.
+      <AuthShell title="Enter your code" subtitle="" brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
+        <p className="text-neutral-400 text-sm mb-6">
+          We sent a verification code to <span className="text-white">{email}</span>. Enter it below to finish signing up.
         </p>
-        <PrimaryButton onClick={goLogin}>Back to login</PrimaryButton>
+        <form className="space-y-4" onSubmit={handleVerifyOtp}>
+          <label className="block">
+            <span className="text-sm text-neutral-400 mb-2 block">Verification code</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              maxLength={8}
+              value={otp}
+              onChange={e => setOtp(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="000000"
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white text-center font-mono text-2xl tracking-[0.4em] outline-none focus:border-neutral-600 placeholder-neutral-700"
+            />
+          </label>
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          {resendNote && <p className="text-sm text-emerald-400">{resendNote}</p>}
+          <PrimaryButton type="submit" disabled={loading || otp.length < 6}>
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify and continue'}
+          </PrimaryButton>
+        </form>
+        <p className="text-center text-sm text-neutral-500 mt-6">
+          Didn't get a code?{' '}
+          <button type="button" onClick={handleResend} disabled={resending} className="text-white font-medium hover:underline disabled:opacity-50">
+            {resending ? 'Sending…' : 'Resend'}
+          </button>
+        </p>
+        <button onClick={goLogin} className="flex items-center gap-2 text-sm text-neutral-500 hover:text-white transition mx-auto mt-4">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to login
+        </button>
       </AuthShell>
     );
   }

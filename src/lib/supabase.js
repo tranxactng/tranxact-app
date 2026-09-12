@@ -14,6 +14,20 @@ export async function signUp({ email, password, username, fullName, referralCode
   return { data, error };
 }
 
+export async function verifySignupOtp(email, token) {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token: String(token).trim(),
+    type: 'signup',
+  });
+  return { data, error };
+}
+
+export async function resendSignupOtp(email) {
+  const { data, error } = await supabase.auth.resend({ type: 'signup', email });
+  return { data, error };
+}
+
 export async function signIn({ email, password }) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   return { data, error };
