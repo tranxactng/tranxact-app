@@ -5,31 +5,19 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const APP_ORIGIN = 'https://app.tranxact.co';
-
 export async function signUp({ email, password, username, fullName, referralCode, businessName }) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${APP_ORIGIN}/auth/confirm`,
+      // Without this, Supabase falls back to whatever "Site URL" is set in
+      // the dashboard — the static marketing site, with no code to
+      // actually complete a confirmation. This sends people back to
+      // wherever signup is actually happening instead.
+      emailRedirectTo: window.location.origin,
       data: { username, full_name: fullName, referral_code: referralCode || null, business_name: businessName || null },
     },
   });
-  return { data, error };
-}
-
-export async function verifySignupOtp(email, token) {
-  const { data, error } = await supabase.auth.verifyOtp({
-    email,
-    token: String(token).trim(),
-    type: 'signup',
-  });
-  return { data, error };
-}
-
-export async function resendSignupOtp(email) {
-  const { data, error } = await supabase.auth.resend({ type: 'signup', email });
   return { data, error };
 }
 
