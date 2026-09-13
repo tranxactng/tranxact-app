@@ -6,7 +6,7 @@ import {
   UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar, Search
 } from 'lucide-react';
 import {
-  supabase, signUp, verifySignupOtp, resendSignupOtp, signIn, requestPasswordReset, signOut,
+  supabase, signUp, signIn, requestPasswordReset, signOut,
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, getTransactionsForMonth, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
   adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
@@ -558,58 +558,6 @@ function LoginScreen({ onLogin, goSignup, goForgot, isDashboard }) {
   );
 }
 
-
-function AuthConfirmScreen() {
-  const [status, setStatus] = useState('confirming');
-  const [message, setMessage] = useState('');
-
-  useEffect(() => {
-    const run = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
-      const tokenHash = params.get('token_hash') || hashParams.get('token_hash');
-      const type = params.get('type') || hashParams.get('type') || 'email';
-      const code = params.get('code');
-      try {
-        if (tokenHash) {
-          const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
-          if (error) throw error;
-        } else if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-        } else {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session) throw new Error('This confirmation link is invalid or has expired.');
-        }
-        window.history.replaceState({}, document.title, '/');
-        setStatus('ok');
-        window.setTimeout(() => { window.location.replace('/'); }, 600);
-      } catch (e) {
-        setStatus('error');
-        setMessage(e.message || 'Could not confirm your email.');
-      }
-    };
-    run();
-  }, []);
-
-  return (
-    <AuthShell title={status === 'error' ? 'Link expired' : 'Confirming your email'} subtitle="">
-      {status === 'confirming' && (
-        <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-neutral-500" /></div>
-      )}
-      {status === 'ok' && (
-        <p className="text-neutral-400 text-sm">Email confirmed. Opening Tranxact…</p>
-      )}
-      {status === 'error' && (
-        <>
-          <p className="text-red-400 text-sm mb-8">{message}</p>
-          <PrimaryButton onClick={() => window.location.replace('/')}>Go to login</PrimaryButton>
-        </>
-      )}
-    </AuthShell>
-  );
-}
-
 function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   const [showPw, setShowPw] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -621,9 +569,6 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [resending, setResending] = useState(false);
-  const [resendNote, setResendNote] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -638,66 +583,13 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
     onSignup();
   };
 
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    setError('');
-    setResendNote('');
-    const code = otp.replace(/\s/g, '');
-    if (code.length < 6) { setError('Enter the code from your email.'); return; }
-    setLoading(true);
-    const { data, error: err } = await verifySignupOtp(email, code);
-    setLoading(false);
-    if (err) { setError(err.message); return; }
-    if (data?.session) { onSignup(); return; }
-    goLogin();
-  };
-
-  const handleResend = async () => {
-    setError('');
-    setResendNote('');
-    setResending(true);
-    const { error: err } = await resendSignupOtp(email);
-    setResending(false);
-    if (err) { setError(err.message); return; }
-    setResendNote('A new code has been sent.');
-  };
-
   if (needsConfirmation) {
     return (
-      <AuthShell title="Enter your code" subtitle="" brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
-        <p className="text-neutral-400 text-sm mb-6">
-          We sent a verification code to <span className="text-white">{email}</span>. Enter it below to finish signing up.
+      <AuthShell title="Check your email" subtitle="" brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
+        <p className="text-neutral-400 text-sm mb-8">
+          We've sent a confirmation link to {email}. Verify your email, then log in.
         </p>
-        <form className="space-y-4" onSubmit={handleVerifyOtp}>
-          <label className="block">
-            <span className="text-sm text-neutral-400 mb-2 block">Verification code</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              autoFocus
-              maxLength={8}
-              value={otp}
-              onChange={e => setOtp(e.target.value.replace(/[^0-9]/g, ''))}
-              placeholder="000000"
-              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white text-center font-mono text-2xl tracking-[0.4em] outline-none focus:border-neutral-600 placeholder-neutral-700"
-            />
-          </label>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          {resendNote && <p className="text-sm text-emerald-400">{resendNote}</p>}
-          <PrimaryButton type="submit" disabled={loading || otp.length < 6}>
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify and continue'}
-          </PrimaryButton>
-        </form>
-        <p className="text-center text-sm text-neutral-500 mt-6">
-          Didn't get a code?{' '}
-          <button type="button" onClick={handleResend} disabled={resending} className="text-white font-medium hover:underline disabled:opacity-50">
-            {resending ? 'Sending…' : 'Resend'}
-          </button>
-        </p>
-        <button onClick={goLogin} className="flex items-center gap-2 text-sm text-neutral-500 hover:text-white transition mx-auto mt-4">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to login
-        </button>
+        <PrimaryButton onClick={goLogin}>Back to login</PrimaryButton>
       </AuthShell>
     );
   }
@@ -8920,12 +8812,6 @@ export default function TranxactApp() {
   // only dashboard or storefront experiences.
   const isNativeApp = typeof window !== 'undefined' && Boolean(window.Capacitor?.isNativePlatform?.());
   if (isNativeApp) return <MobileAppRoot />;
-
-  // Email confirm links must never hit the marketing site. Handle them on
-  // every app hostname before pay/business routing.
-  if (pathname.startsWith('/auth/confirm') || pathname.startsWith('/auth/callback')) {
-    return <AuthConfirmScreen />;
-  }
 
   // pay.tranxact.co is the real business dashboard again — it's not a
   // marketing destination, it's the tool a business owner actually gets
