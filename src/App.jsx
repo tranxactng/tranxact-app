@@ -500,6 +500,81 @@ function WelcomeScreen({ onContinue }) {
   );
 }
 
+// Real standalone-mode detection — true only when actually running as an
+// installed PWA, covering both the standard media query and iOS Safari's
+// older, non-standard navigator flag.
+function isRunningStandalone() {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia?.('(display-mode: standalone)')?.matches
+    || window.navigator?.standalone === true;
+}
+
+function detectPlatform() {
+  if (typeof navigator === 'undefined') return 'other';
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes('Macintosh') && navigator.maxTouchPoints > 1);
+  if (isIOS) return 'ios';
+  if (/Android/.test(ua)) return 'android';
+  return 'other';
+}
+
+function AddToHomeScreenModal({ onClose }) {
+  const platform = detectPlatform();
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full sm:max-w-sm bg-neutral-950 border border-neutral-800 rounded-t-3xl sm:rounded-3xl p-6 pb-8">
+        <div className="w-12 h-12 rounded-full bg-violet-500/15 flex items-center justify-center mb-4">
+          <Smartphone className="w-5 h-5 text-violet-400" />
+        </div>
+        <h2 className="text-lg font-bold mb-1">Add Tranxact to your Home Screen</h2>
+        <p className="text-sm text-neutral-500 mb-5">Ten seconds of setup, and Tranxact opens instantly, full screen, no browser bar.</p>
+
+        {platform === 'ios' && (
+          <div className="space-y-3 mb-5">
+            <div className="flex gap-3 items-start">
+              <span className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5">1</span>
+              <p className="text-sm text-neutral-300">Tap the <Share2 className="w-3.5 h-3.5 inline mx-0.5 -mt-0.5" /> Share button in Safari's toolbar</p>
+            </div>
+            <div className="flex gap-3 items-start">
+              <span className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5">2</span>
+              <p className="text-sm text-neutral-300">Scroll down and tap <span className="text-white font-medium">Add to Home Screen</span></p>
+            </div>
+            <div className="flex gap-3 items-start">
+              <span className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5">3</span>
+              <p className="text-sm text-neutral-300">Tap <span className="text-white font-medium">Add</span> in the top right</p>
+            </div>
+          </div>
+        )}
+
+        {platform === 'android' && (
+          <div className="space-y-3 mb-5">
+            <div className="flex gap-3 items-start">
+              <span className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5">1</span>
+              <p className="text-sm text-neutral-300">Tap the <span className="text-white font-medium">⋮</span> menu in Chrome's toolbar</p>
+            </div>
+            <div className="flex gap-3 items-start">
+              <span className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5">2</span>
+              <p className="text-sm text-neutral-300">Tap <span className="text-white font-medium">Add to Home screen</span></p>
+            </div>
+            <div className="flex gap-3 items-start">
+              <span className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5">3</span>
+              <p className="text-sm text-neutral-300">Tap <span className="text-white font-medium">Add</span> to confirm</p>
+            </div>
+          </div>
+        )}
+
+        {platform === 'other' && (
+          <p className="text-sm text-neutral-400 mb-5">Open this page on your phone in Safari or Chrome, then use your browser's "Add to Home Screen" option in the share or menu button.</p>
+        )}
+
+        <PrimaryButton onClick={onClose}>Got it</PrimaryButton>
+        <p className="text-center text-xs text-neutral-600 mt-3">You can always find this again in Profile</p>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin, goSignup, goForgot, isDashboard }) {
   const [showPw, setShowPw] = useState(false);
   const [email, setEmail] = useState('');
@@ -5452,7 +5527,7 @@ function SupportScreen({ onBack }) {
   );
 }
 
-function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails, userId }) {
+function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails, onOpenAddToHomeScreen, userId }) {
   const [showVerification, setShowVerification] = useState(false);
   const items = [
     { label: 'Account details', icon: UserCircle, onClick: onOpenAccountDetails },
@@ -5461,6 +5536,7 @@ function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, o
     { label: 'Verification', icon: ShieldCheck, onClick: () => setShowVerification(true) },
     { label: 'Security', icon: Lock, onClick: onOpenSecurity },
     { label: 'Settings', icon: Settings, onClick: onOpenSettings },
+    { label: 'Add to Home Screen', icon: Home, onClick: onOpenAddToHomeScreen },
     { label: 'Help & Support', icon: Smartphone, onClick: onOpenSupport },
   ];
   return (
@@ -5766,6 +5842,7 @@ function AppShell({ tab, setTab, isAdmin = false, children }) {
 
 function MobileAppRoot() {
   const [screen, setScreen] = useState('splash'); // splash | login | signup | forgot | forgotSent | welcome | app
+  const [showAddToHomeScreen, setShowAddToHomeScreen] = useState(false);
   const [tab, setTab] = useState('home');
   const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | notifications
   const [sendAgainUsername, setSendAgainUsername] = useState('');
@@ -5810,6 +5887,10 @@ function MobileAppRoot() {
     // which is why this couldn't fire at signup time. Never blocks getting
     // into the app if it's slow or fails; nothing here is awaited by setScreen.
     sendWelcomeEmail(profile?.username).catch(() => {});
+    // Tied to this same one-time flow, so it only ever fires once,
+    // automatically — no separate dismissal flag needed. Skipped entirely
+    // if they're somehow already running as an installed PWA at this point.
+    if (!isRunningStandalone()) setShowAddToHomeScreen(true);
     setScreen('app');
   };
 
@@ -5983,6 +6064,7 @@ function MobileAppRoot() {
           onOpenSecurity={() => setProfileView('security')}
           onOpenSettings={() => setProfileView('settings')}
           onOpenAccountDetails={() => setProfileView('account')}
+          onOpenAddToHomeScreen={() => setShowAddToHomeScreen(true)}
           userId={profile?.id}
         />
       )}
@@ -6008,6 +6090,7 @@ function MobileAppRoot() {
       )}
 
       {tpOpen && <TranxactPayScreen onClose={() => setTpOpen(false)} username={profile?.username || ''} />}
+      {showAddToHomeScreen && <AddToHomeScreenModal onClose={() => setShowAddToHomeScreen(false)} />}
     </AppShell>
   );
 }
