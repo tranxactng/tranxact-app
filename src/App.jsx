@@ -22,6 +22,18 @@ import {
   getKycInfo, submitNin, revealNin, adminSendCustomEmail, adminBroadcastEmail
 } from './lib/supabase.js';
 
+// Supabase emails an 8-digit code for signup and password reset (Authentication ->
+// Providers -> Email -> "Email OTP Length"). If you change that setting, change this to match.
+const AUTH_CODE_LENGTH = 8;
+
+// While someone resets their password, verifying the emailed code signs them in.
+// The auth listener waits until the new password is saved instead of jumping to home.
+let passwordResetInProgress = false;
+
+const friendlyCodeError = (msg) => /expired|invalid/i.test(msg || '')
+  ? 'That code is wrong or has expired. Check your latest email, or request a new code.'
+  : (msg || 'Something went wrong. Please try again.');
+
 // ---------- Demo data ----------
 const ASSETS = [
   { symbol: 'USDT', name: 'Tether', network: 'TRC20', address: 'TXk9Qm2vD8yZp4Rj7Ln3fQ2xVh5tYc9Bwe', price: 1550.2, change: 0.02 },
@@ -631,6 +643,83 @@ function LoginScreen({ onLogin, goSignup, goForgot, isDashboard }) {
   );
 }
 
+function AuthCodeInput({ value, onChange, onComplete, disabled }) {
+  return (
+    <label className="block">
+      <span className="text-sm text-neutral-400 mb-2 block">Code from your email</span>
+      <input
+        value={value}
+        onChange={e => {
+          const v = e.target.value.replace(/\D/g, '').slice(0, AUTH_CODE_LENGTH);
+          onChange(v);
+          if (v.length === AUTH_CODE_LENGTH && onComplete) onComplete(v);
+        }}
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        placeholder={'\u2022'.repeat(AUTH_CODE_LENGTH)}
+        autoFocus
+        disabled={disabled}
+        aria-label="Code from your email"
+        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3.5 text-center font-mono text-2xl tracking-[0.35em] text-white placeholder-neutral-700 outline-none focus:border-neutral-600 transition disabled:opacity-50"
+      />
+    </label>
+  );
+}
+
+// After signup: enter the emailed code. Success signs them in, and the auth
+// listener loads the account and opens the app, same as logging in.
+function SignupCodeScreen({ email, onChangeEmail, isDashboard }) {
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const [cooldown, setCooldown] = useState(60);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const verify = async (value) => {
+    const token = String(value ?? code).replace(/\D/g, '');
+    if (token.length !== AUTH_CODE_LENGTH || loading) return;
+    setError(''); setNote(''); setLoading(true);
+    const { error: err } = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
+    if (err) { setLoading(false); setError(friendlyCodeError(err.message)); }
+  };
+
+  const resend = async () => {
+    setError(''); setNote('');
+    const { error: err } = await supabase.auth.resend({ type: 'signup', email });
+    if (err) { setError(err.message); return; }
+    setNote('A new code is on its way.'); setCode(''); setCooldown(60);
+  };
+
+  return (
+    <AuthShell title="Check your email" subtitle="" brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
+      <p className="text-neutral-400 text-sm mb-6">
+        We sent a {AUTH_CODE_LENGTH}-digit code to <span className="text-white">{email}</span>. Enter it to confirm your account.
+      </p>
+      <form className="space-y-4" onSubmit={e => { e.preventDefault(); verify(); }}>
+        <AuthCodeInput value={code} onChange={v => { setCode(v); setError(''); }} onComplete={verify} disabled={loading} />
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        {note && <p className="text-sm text-emerald-400">{note}</p>}
+        <PrimaryButton type="submit" disabled={loading || code.length !== AUTH_CODE_LENGTH}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm account'}
+        </PrimaryButton>
+      </form>
+      <div className="flex items-center justify-center gap-4 text-sm text-neutral-500 mt-6">
+        <button type="button" onClick={resend} disabled={cooldown > 0} className="hover:text-white transition disabled:opacity-50 disabled:hover:text-neutral-500">
+          {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+        </button>
+        <span aria-hidden="true">&middot;</span>
+        <button type="button" onClick={onChangeEmail} className="hover:text-white transition">Use a different email</button>
+      </div>
+    </AuthShell>
+  );
+}
+
 function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   const [showPw, setShowPw] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -657,14 +746,7 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   };
 
   if (needsConfirmation) {
-    return (
-      <AuthShell title="Check your email" subtitle="" brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
-        <p className="text-neutral-400 text-sm mb-8">
-          We've sent a confirmation link to {email}. Verify your email, then log in.
-        </p>
-        <PrimaryButton onClick={goLogin}>Back to login</PrimaryButton>
-      </AuthShell>
-    );
+    return <SignupCodeScreen email={email.trim()} isDashboard={isDashboard} onChangeEmail={() => setNeedsConfirmation(false)} />;
   }
 
   return (
@@ -715,31 +797,128 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   );
 }
 
-function ForgotScreen({ onSent, goLogin, isDashboard }) {
+function ForgotScreen({ onDone, goLogin, isDashboard }) {
+  const [step, setStep] = useState('email');
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [verified, setVerified] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const [cooldown, setCooldown] = useState(0);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    const { error: err } = await requestPasswordReset(email);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+  // Leaving this screen part-way must never leave the app stuck in "reset" mode.
+  useEffect(() => () => { passwordResetInProgress = false; }, []);
+
+  const brand = isDashboard ? 'Tranxact Pay' : 'Tranxact';
+  const tagline = isDashboard ? 'Payment Dashboard' : undefined;
+
+  const sendCode = async (e) => {
+    if (e) e.preventDefault();
+    setError(''); setNote(''); setLoading(true);
+    const { error: err } = await requestPasswordReset(email.trim());
     setLoading(false);
     if (err) { setError(err.message); return; }
-    onSent();
+    if (step === 'code') { setNote('A new code is on its way.'); setCode(''); }
+    setStep('code'); setCooldown(60);
   };
 
+  const save = async (e) => {
+    e.preventDefault();
+    setError(''); setNote('');
+    if (!verified && code.length !== AUTH_CODE_LENGTH) { setError(`Enter the ${AUTH_CODE_LENGTH}-digit code from your email.`); return; }
+    if (password.length < 8) { setError('Your new password needs at least 8 characters.'); return; }
+    setLoading(true);
+    try {
+      if (!verified) {
+        passwordResetInProgress = true;   // verifying signs them in; hold the listener until the password is saved
+        const { error: err } = await supabase.auth.verifyOtp({ email: email.trim(), token: code, type: 'recovery' });
+        if (err) { passwordResetInProgress = false; throw new Error(friendlyCodeError(err.message)); }
+        setVerified(true);
+      }
+      await updatePassword(password);
+      passwordResetInProgress = false;
+      await onDone();
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  const backToLogin = async () => {
+    passwordResetInProgress = false;
+    if (verified) await signOut();   // the code signed them in but no new password was saved
+    goLogin();
+  };
+
+  if (step === 'email') {
+    return (
+      <AuthShell title="Reset your password" subtitle="Enter the email on your account and we'll send you a code." brandLabel={brand} tagline={tagline}>
+        <form className="space-y-4" onSubmit={sendCode}>
+          <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" required value={email} onChange={e => setEmail(e.target.value)} />
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          <PrimaryButton type="submit" className="mt-2" disabled={loading}>
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send code'}
+          </PrimaryButton>
+        </form>
+        <button onClick={backToLogin} className="flex items-center gap-2 text-sm text-neutral-500 hover:text-white transition mx-auto mt-6">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to login
+        </button>
+      </AuthShell>
+    );
+  }
+
   return (
-    <AuthShell title="Reset your password" subtitle="Enter the email on your account and we'll send a reset link." brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" required value={email} onChange={e => setEmail(e.target.value)} />
+    <AuthShell title="Check your email" subtitle="" brandLabel={brand} tagline={tagline}>
+      <p className="text-neutral-400 text-sm mb-6">
+        If <span className="text-white">{email.trim()}</span> has a Tranxact account, we've sent it a {AUTH_CODE_LENGTH}-digit code. Enter it and choose a new password.
+      </p>
+      <form className="space-y-4" onSubmit={save}>
+        {verified ? (
+          <p className="flex items-center gap-2 text-sm text-emerald-400"><Check className="w-4 h-4" /> Code confirmed</p>
+        ) : (
+          <AuthCodeInput value={code} onChange={v => { setCode(v); setError(''); }} disabled={loading} />
+        )}
+        <label className="block">
+          <span className="text-sm text-neutral-400 mb-2 block">New password</span>
+          <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-neutral-600 transition">
+            <Lock className="w-4 h-4 text-neutral-500 flex-shrink-0" />
+            <input
+              type={showPw ? 'text' : 'password'}
+              placeholder="At least 8 characters"
+              autoComplete="new-password"
+              value={password}
+              onChange={e => { setPassword(e.target.value); setError(''); }}
+              className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full"
+            />
+            <button type="button" onClick={() => setShowPw(v => !v)} className="text-neutral-500 hover:text-white transition" aria-label={showPw ? 'Hide password' : 'Show password'}>
+              {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+        </label>
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <PrimaryButton type="submit" className="mt-2" disabled={loading}>
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send reset link'}
+        {note && <p className="text-sm text-emerald-400">{note}</p>}
+        <PrimaryButton type="submit" disabled={loading}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save new password'}
         </PrimaryButton>
       </form>
-      <button onClick={goLogin} className="flex items-center gap-2 text-sm text-neutral-500 hover:text-white transition mx-auto mt-6">
+      {!verified && (
+        <div className="flex items-center justify-center gap-4 text-sm text-neutral-500 mt-6">
+          <button type="button" onClick={() => sendCode()} disabled={cooldown > 0 || loading} className="hover:text-white transition disabled:opacity-50 disabled:hover:text-neutral-500">
+            {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+          </button>
+          <span aria-hidden="true">&middot;</span>
+          <button type="button" onClick={() => { setStep('email'); setCode(''); setError(''); setNote(''); }} className="hover:text-white transition">Use a different email</button>
+        </div>
+      )}
+      <button onClick={backToLogin} className="flex items-center gap-2 text-sm text-neutral-500 hover:text-white transition mx-auto mt-6">
         <ArrowLeft className="w-3.5 h-3.5" /> Back to login
       </button>
     </AuthShell>
@@ -3161,6 +3340,78 @@ function CardsScreen({ fullName = '' }) {
 
 // ---------- Profile ----------
 // ---------- Admin ----------
+// Admin switch for guest payment links (people without an account). Only admins can
+// call these database functions; everyone else gets "Forbidden".
+function GuestLinksAdminCard() {
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const load = async () => {
+    const { data, error } = await supabase.rpc('admin_guest_links_status');
+    if (error) setErr(error.message);
+    else { setStatus(data); setErr(''); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggle = async () => {
+    if (!status) return;
+    const next = !status.live;
+    const ok = window.confirm(next
+      ? 'Turn guest payment links ON? People without an account can create links and get paid.'
+      : 'Turn guest payment links OFF? Guest links stop accepting payments until you turn them back on.');
+    if (!ok) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc('admin_set_guest_links_live', { p_live: next });
+    setBusy(false);
+    if (error) setErr(error.message);
+    else { setStatus(data); setErr(''); }
+  };
+
+  return (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-neutral-400" />
+            <span className="text-sm font-semibold">Guest payment links</span>
+          </div>
+          <p className="text-xs text-neutral-500 mt-1">
+            {status ? (status.live ? 'On: anyone can create a link and get paid' : 'Off: guest links are paused') : 'Loading…'}
+          </p>
+        </div>
+        <button
+          onClick={toggle}
+          disabled={!status || busy}
+          role="switch"
+          aria-checked={!!status?.live}
+          aria-label="Guest payment links"
+          className={`relative w-12 h-7 rounded-full transition flex-shrink-0 ${status?.live ? 'bg-emerald-500' : 'bg-neutral-700'} ${(!status || busy) ? 'opacity-50' : ''}`}
+        >
+          <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-all ${status?.live ? 'left-6' : 'left-1'}`} />
+        </button>
+      </div>
+      {status && (
+        <div className="grid grid-cols-3 gap-2 mt-3 text-center">
+          <div className="bg-neutral-900 rounded-xl py-2">
+            <div className="font-mono text-sm font-bold">{status.links}</div>
+            <div className="text-[10px] text-neutral-500">Guest links</div>
+          </div>
+          <div className="bg-neutral-900 rounded-xl py-2">
+            <div className={`font-mono text-sm font-bold ${status.payouts_queued ? 'text-amber-400' : ''}`}>{status.payouts_queued}</div>
+            <div className="text-[10px] text-neutral-500">Payouts queued</div>
+          </div>
+          <div className="bg-neutral-900 rounded-xl py-2">
+            <div className={`font-mono text-sm font-bold ${status.needs_review ? 'text-red-400' : ''}`}>{status.needs_review}</div>
+            <div className="text-[10px] text-neutral-500">Need review</div>
+          </div>
+        </div>
+      )}
+      {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
+    </div>
+  );
+}
+
 function AdminScreen() {
   const [adminTab, setAdminTab] = useState('overview');
   const [searchUsername, setSearchUsername] = useState('');
@@ -3910,6 +4161,8 @@ function AdminScreen() {
         </PrimaryButton>
       </div>
       )}
+
+      {adminTab === 'payment' && <GuestLinksAdminCard />}
 
       {adminTab === 'payment' && (
       <div className="bg-neutral-950 border border-violet-500/30 rounded-2xl p-4">
@@ -4951,7 +5204,7 @@ function CheckoutPage({ slug }) {
               </div>
             )}
             <div className="min-w-0">
-              <p className="text-xs text-neutral-500">{link.is_tip ? 'Tipping' : 'Paying'} @{link.creator_username}</p>
+              <p className="text-xs text-neutral-500">{link.is_tip ? 'Tipping' : 'Paying'} {link.is_guest ? link.creator_username : `@${link.creator_username}`}</p>
               {link.title && <p className="font-semibold truncate">{link.title}</p>}
             </div>
           </div>
@@ -5281,12 +5534,12 @@ function CheckoutPage({ slug }) {
             <Check className="w-6 h-6 text-emerald-400" />
           </div>
           <h2 className="text-lg font-bold mb-1">Payment noted</h2>
-          <p className="text-sm text-neutral-500 mb-1">We're confirming this and will credit @{link.creator_username} shortly.</p>
+          <p className="text-sm text-neutral-500 mb-1">{link.is_guest ? `We're confirming this and will pay ${link.creator_username} shortly.` : `We're confirming this and will credit @${link.creator_username} shortly.`}</p>
           <p className="text-xs text-neutral-600 font-mono mt-4 mb-6">Ref: {notice.reference}</p>
           <a href="https://tranxact.co" className="block mb-3">
             <PrimaryButton onClick={() => {}}>Done</PrimaryButton>
           </a>
-          <a href={`https://app.tranxact.co/?ref=${link.creator_username}`} className="block text-sm text-violet-400 hover:text-violet-300 transition py-2">
+          <a href={link.is_guest ? 'https://app.tranxact.co/' : `https://app.tranxact.co/?ref=${link.creator_username}`} className="block text-sm text-violet-400 hover:text-violet-300 transition py-2">
             New here? Join Tranxact →
           </a>
         </div>
@@ -5894,6 +6147,15 @@ function MobileAppRoot() {
     setScreen('app');
   };
 
+  // ForgotScreen calls this once the new password is saved. The auth listener stayed
+  // quiet during the reset, so this does what it would have done.
+  const finishPasswordReset = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setScreen('login'); return; }
+    await loadUserData(session.user.id);
+    setScreen(hasSeenWelcome(session) ? 'app' : 'welcome');
+  };
+
   useEffect(() => {
     const minSplashTime = new Promise(resolve => setTimeout(resolve, 1200));
 
@@ -5912,6 +6174,7 @@ function MobileAppRoot() {
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!initializedRef.current) return; // the initial load is already handled by init() above
+      if (passwordResetInProgress) return; // ForgotScreen finishes this itself once the new password is saved
       if (session) {
         loadUserData(session.user.id).then(() => {
           setScreen(hasSeenWelcome(session) ? 'app' : 'welcome');
@@ -5942,7 +6205,7 @@ function MobileAppRoot() {
 
   if (screen === 'login') return <LoginScreen onLogin={() => {}} goSignup={() => setScreen('signup')} goForgot={() => setScreen('forgot')} />;
   if (screen === 'signup') return <SignupScreen onSignup={() => {}} goLogin={() => setScreen('login')} initialReferralCode={referralFromUrl} />;
-  if (screen === 'forgot') return <ForgotScreen onSent={() => setScreen('forgotSent')} goLogin={() => setScreen('login')} />;
+  if (screen === 'forgot') return <ForgotScreen onDone={finishPasswordReset} goLogin={() => setScreen('login')} />;
   if (screen === 'forgotSent') return <ForgotSentScreen goLogin={() => setScreen('login')} />;
   if (screen === 'welcome') return <WelcomeScreen onContinue={handleWelcomeContinue} />;
 
