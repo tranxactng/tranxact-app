@@ -3,7 +3,8 @@ import {
   Eye, EyeOff, Bell, ArrowDownToLine, ArrowUpFromLine, Link2, Smartphone, Wifi, Zap, Tv,
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
-  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar, Search
+  UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar, Search,
+  RefreshCw,
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -33,6 +34,27 @@ let passwordResetInProgress = false;
 const friendlyCodeError = (msg) => /expired|invalid/i.test(msg || '')
   ? 'That code is wrong or has expired. Check your latest email, or request a new code.'
   : (msg || 'Something went wrong. Please try again.');
+
+// Shown instead of the PIN pad when someone hasn't set a transaction PIN yet,
+// rather than letting the request go through and fail on the server.
+function PinRequiredNotice({ onSetupPin, onBack }) {
+  return (
+    <div>
+      <BackHeader title="Set up your PIN" onBack={onBack} />
+      <div className="flex flex-col items-center text-center pt-6">
+        <div className="w-14 h-14 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-5">
+          <ShieldCheck className="w-6 h-6 text-white" />
+        </div>
+        <h2 className="text-lg font-semibold mb-2">You need a transaction PIN first</h2>
+        <p className="text-sm text-neutral-400 mb-8 max-w-xs">
+          Your PIN keeps your money safe. Set one up once, then come back and finish this.
+        </p>
+        <PrimaryButton onClick={onSetupPin}>Set up PIN</PrimaryButton>
+        <button onClick={onBack} className="text-sm text-neutral-500 hover:text-white transition mt-5">Not now</button>
+      </div>
+    </div>
+  );
+}
 
 // ---------- Demo data ----------
 const ASSETS = [
@@ -75,6 +97,7 @@ function mapTransaction(row) {
     fund_bank: { title: 'Wallet funded', icon: ArrowDownToLine },
     referral: { title: 'Referral earning', icon: Users },
     tranxactpay: { title: row.description || 'Payment link', icon: Link2 },
+    withdrawal: { title: 'Withdrawal to bank', icon: ArrowUpFromLine },
   };
   const meta = byType[row.type] || { title: row.type, icon: Wallet };
   const pending = row.status === 'pending';
@@ -720,7 +743,7 @@ function SignupCodeScreen({ email, onChangeEmail, isDashboard }) {
   );
 }
 
-function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
+function SignupScreen({ onSignup, onExistingAccount, goLogin, initialReferralCode, isDashboard }) {
   const [showPw, setShowPw] = useState(false);
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
@@ -741,6 +764,14 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
     const { data, error: err } = await signUp({ email, password, username: cleanUsername, fullName, referralCode: cleanReferral || null, businessName: isDashboard ? (businessName.trim() || null) : null });
     setLoading(false);
     if (err) { setError(err.message); return; }
+    // When the email already has an account, Supabase reports success but returns no identities
+    // (it hides whether the email exists). That is someone who started with a payment link, or who
+    // forgot they signed up. Send them a code to set a password and sign in, instead of a dead end.
+    if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0 && onExistingAccount) {
+      await requestPasswordReset(email.trim());
+      onExistingAccount(email.trim());
+      return;
+    }
     if (!data.session) { setNeedsConfirmation(true); return; }
     onSignup();
   };
@@ -797,9 +828,10 @@ function SignupScreen({ onSignup, goLogin, initialReferralCode, isDashboard }) {
   );
 }
 
-function ForgotScreen({ onDone, goLogin, isDashboard }) {
-  const [step, setStep] = useState('email');
-  const [email, setEmail] = useState('');
+function ForgotScreen({ onDone, goLogin, isDashboard, prefillEmail }) {
+  // prefillEmail means a code was just sent (they tried to sign up with an email that already has an account).
+  const [step, setStep] = useState(prefillEmail ? 'code' : 'email');
+  const [email, setEmail] = useState(prefillEmail || '');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -807,7 +839,7 @@ function ForgotScreen({ onDone, goLogin, isDashboard }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const [cooldown, setCooldown] = useState(0);
+  const [cooldown, setCooldown] = useState(prefillEmail ? 60 : 0);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -878,7 +910,9 @@ function ForgotScreen({ onDone, goLogin, isDashboard }) {
   return (
     <AuthShell title="Check your email" subtitle="" brandLabel={brand} tagline={tagline}>
       <p className="text-neutral-400 text-sm mb-6">
-        If <span className="text-white">{email.trim()}</span> has a Tranxact account, we've sent it a {AUTH_CODE_LENGTH}-digit code. Enter it and choose a new password.
+        {prefillEmail
+          ? <>This email already has a Tranxact account, so we sent a {AUTH_CODE_LENGTH}-digit code to <span className="text-white">{email.trim()}</span>. Enter it and choose a password to sign in.</>
+          : <>If <span className="text-white">{email.trim()}</span> has a Tranxact account, we've sent it a {AUTH_CODE_LENGTH}-digit code. Enter it and choose a new password.</>}
       </p>
       <form className="space-y-4" onSubmit={save}>
         {verified ? (
@@ -1788,7 +1822,7 @@ const TV_PROVIDERS = [
   { id: 'startimes', label: 'StarTimes' },
 ];
 
-function TVScreen({ onBack, onDone, hasPin }) {
+function TVScreen({ onBack, onDone, hasPin, onSetupPin }) {
   const [step, setStep] = useState('form'); // form | packages | confirm | pin | result
   const [provider, setProvider] = useState('dstv');
   const [smartcardNumber, setSmartcardNumber] = useState('');
@@ -1841,12 +1875,9 @@ function TVScreen({ onBack, onDone, hasPin }) {
   };
 
   const handleConfirm = () => {
-    if (hasPin) {
-      setPinError('');
-      setStep('pin');
-      return;
-    }
-    executePurchase();
+    if (!hasPin) { setStep('needsPin'); return; }
+    setPinError('');
+    setStep('pin');
   };
 
   const handlePinSubmit = async () => {
@@ -1867,6 +1898,8 @@ function TVScreen({ onBack, onDone, hasPin }) {
       setPinLoading(false);
     }
   };
+
+  if (step === 'needsPin') return <PinRequiredNotice onSetupPin={onSetupPin} onBack={() => setStep('confirm')} />;
 
   if (step === 'result' && result) {
     const isSettled = result.status === 'settled';
@@ -2025,7 +2058,7 @@ function TVScreen({ onBack, onDone, hasPin }) {
   );
 }
 
-function ElectricityScreen({ onBack, onDone, hasPin }) {
+function ElectricityScreen({ onBack, onDone, hasPin, onSetupPin }) {
   const [step, setStep] = useState('form'); // form | confirm | pin | result
   const [disco, setDisco] = useState('ikeja-electric');
   const [meterType, setMeterType] = useState('prepaid');
@@ -2075,12 +2108,9 @@ function ElectricityScreen({ onBack, onDone, hasPin }) {
   };
 
   const handleConfirm = () => {
-    if (hasPin) {
-      setPinError('');
-      setStep('pin');
-      return;
-    }
-    executePurchase();
+    if (!hasPin) { setStep('needsPin'); return; }
+    setPinError('');
+    setStep('pin');
   };
 
   const handlePinSubmit = async () => {
@@ -2101,6 +2131,8 @@ function ElectricityScreen({ onBack, onDone, hasPin }) {
       setPinLoading(false);
     }
   };
+
+  if (step === 'needsPin') return <PinRequiredNotice onSetupPin={onSetupPin} onBack={() => setStep('confirm')} />;
 
   if (step === 'result' && result) {
     const isSettled = result.status === 'settled';
@@ -2246,7 +2278,7 @@ function ElectricityScreen({ onBack, onDone, hasPin }) {
   );
 }
 
-function AirtimeScreen({ onBack, onDone, hasPin }) {
+function AirtimeScreen({ onBack, onDone, hasPin, onSetupPin }) {
   const [step, setStep] = useState('form'); // form | confirm | pin | result
   const [network, setNetwork] = useState('mtn');
   const [phone, setPhone] = useState('');
@@ -2278,12 +2310,9 @@ function AirtimeScreen({ onBack, onDone, hasPin }) {
   };
 
   const handleConfirm = () => {
-    if (hasPin) {
-      setPinError('');
-      setStep('pin');
-      return;
-    }
-    executePurchase();
+    if (!hasPin) { setStep('needsPin'); return; }
+    setPinError('');
+    setStep('pin');
   };
 
   const handlePinSubmit = async () => {
@@ -2304,6 +2333,8 @@ function AirtimeScreen({ onBack, onDone, hasPin }) {
       setPinLoading(false);
     }
   };
+
+  if (step === 'needsPin') return <PinRequiredNotice onSetupPin={onSetupPin} onBack={() => setStep('confirm')} />;
 
   if (step === 'result' && result) {
     const isSettled = result.status === 'settled';
@@ -2451,7 +2482,7 @@ const DATA_NETWORKS = [
   { id: 'etisalat-data', label: '9mobile' },
 ];
 
-function DataScreen({ onBack, onDone, hasPin }) {
+function DataScreen({ onBack, onDone, hasPin, onSetupPin }) {
   const [step, setStep] = useState('form'); // form | confirm | pin | result
   const [network, setNetwork] = useState('mtn-data');
   const [variations, setVariations] = useState(null); // null = loading, [] = loaded
@@ -2493,12 +2524,9 @@ function DataScreen({ onBack, onDone, hasPin }) {
   };
 
   const handleConfirm = () => {
-    if (hasPin) {
-      setPinError('');
-      setStep('pin');
-      return;
-    }
-    executePurchase();
+    if (!hasPin) { setStep('needsPin'); return; }
+    setPinError('');
+    setStep('pin');
   };
 
   const handlePinSubmit = async () => {
@@ -2519,6 +2547,8 @@ function DataScreen({ onBack, onDone, hasPin }) {
       setPinLoading(false);
     }
   };
+
+  if (step === 'needsPin') return <PinRequiredNotice onSetupPin={onSetupPin} onBack={() => setStep('confirm')} />;
 
   if (step === 'result' && result) {
     const isSettled = result.status === 'settled';
@@ -2656,7 +2686,7 @@ function DataScreen({ onBack, onDone, hasPin }) {
   );
 }
 
-function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
+function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }) {
   const [mode, setMode] = useState('user');
   const [step, setStep] = useState('form');
   const [username, setUsername] = useState(initialUsername);
@@ -2723,12 +2753,9 @@ function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
   };
 
   const handleConfirm = () => {
-    if (hasPin) {
-      setPinError('');
-      setStep('pin');
-      return;
-    }
-    executeSend();
+    if (!hasPin) { setStep('needsPin'); return; }
+    setPinError('');
+    setStep('pin');
   };
 
   const handlePinSubmit = async () => {
@@ -2749,6 +2776,8 @@ function SendScreen({ onBack, onDone, hasPin, initialUsername = '' }) {
       setPinLoading(false);
     }
   };
+
+  if (step === 'needsPin') return <PinRequiredNotice onSetupPin={onSetupPin} onBack={() => setStep('confirm')} />;
 
   if (step === 'success') {
     const shareReceipt = async () => {
@@ -3412,8 +3441,93 @@ function GuestLinksAdminCard() {
   );
 }
 
-function AdminScreen() {
-  const [adminTab, setAdminTab] = useState('overview');
+// Admin: NINs waiting for review. Approve lifts the person's receiving limit; reject lets them resubmit.
+// Approve only after you've actually checked the NIN (for example on a NIN lookup service).
+function KycReviewCard({ onCount }) {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [copied, setCopied] = useState(null);
+
+  const load = async () => {
+    const { data, error: err } = await supabase.rpc('admin_kyc_queue');
+    if (err) { setError(err.message); return; }
+    setError(''); setItems(data || []);
+    if (onCount) onCount((data || []).length);
+  };
+  useEffect(() => { load(); }, []);
+
+  const copy = async (u) => {
+    try { await navigator.clipboard.writeText(u.nin); setCopied(u.id); setTimeout(() => setCopied(null), 1500); } catch { /* ignore */ }
+  };
+
+  const review = async (u, approve) => {
+    let note = null;
+    if (approve) {
+      const ok = window.confirm(`Approve ${u.full_name || u.username}?\n\nOnly approve after you have checked that NIN ${u.nin} belongs to "${u.nin_name}".`);
+      if (!ok) return;
+    } else {
+      note = window.prompt('Why are you rejecting this? Only you will see this note. Leave it empty to skip.', '');
+      if (note === null) return;   // cancelled
+    }
+    setBusyId(u.id);
+    const { error: err } = await supabase.rpc('admin_review_kyc', { p_user: u.id, p_approve: approve, p_note: note || null });
+    setBusyId(null);
+    if (err) { setError(err.message); return; }
+    load();
+  };
+
+  return (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-neutral-400" /><span className="text-sm font-semibold">ID review</span></div>
+        <button onClick={load} className="text-xs text-neutral-400 hover:text-white transition">Reload</button>
+      </div>
+      <p className="text-xs text-neutral-500 mb-4">People who submitted a NIN. Their names already match their account. Check the NIN is real, then approve.</p>
+      {items === null && !error && <p className="text-sm text-neutral-500">Loading…</p>}
+      {items && items.length === 0 && <p className="text-sm text-neutral-500">Nothing waiting for review.</p>}
+      <div className="space-y-3">
+        {(items || []).map(u => (
+          <div key={u.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-3.5">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate">{u.full_name || u.username}</div>
+                <div className="text-xs text-neutral-500 truncate">@{u.username}{u.email ? ` · ${u.email}` : ''}</div>
+              </div>
+              {u.started_as_guest && <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 flex-shrink-0">Started as guest</span>}
+            </div>
+            <div className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between gap-3"><span className="text-neutral-500">Name on NIN</span><span className="text-right">{u.nin_name}</span></div>
+              <div className="flex justify-between gap-3 items-center">
+                <span className="text-neutral-500">NIN</span>
+                <span className="font-mono flex items-center gap-2">{u.nin}
+                  <button onClick={() => copy(u)} className="text-neutral-400 hover:text-white underline underline-offset-2 font-sans">{copied === u.id ? 'Copied' : 'Copy'}</button>
+                </span>
+              </div>
+              <div className="flex justify-between gap-3"><span className="text-neutral-500">Received so far</span><span className="font-mono">{fmtNaira(u.received)}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-neutral-500">Submitted</span><span>{u.submitted_at ? new Date(u.submitted_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '\u2014'}</span></div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-3.5">
+              <button onClick={() => review(u, true)} disabled={busyId === u.id} className="bg-white text-black text-sm font-semibold rounded-xl py-2.5 disabled:opacity-50 active:scale-[0.98] transition">{busyId === u.id ? '\u2026' : 'Approve'}</button>
+              <button onClick={() => review(u, false)} disabled={busyId === u.id} className="border border-neutral-700 text-sm font-semibold rounded-xl py-2.5 disabled:opacity-50 active:scale-[0.98] transition">Reject</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
+    </div>
+  );
+}
+
+function AdminScreen({ onRefresh }) {
+  // Remember the open tab, so Refresh (which reloads everything) keeps you where you were.
+  const [adminTab, setAdminTab] = useState(() => {
+    try { return sessionStorage.getItem('adminTab') || 'overview'; } catch { return 'overview'; }
+  });
+  useEffect(() => { try { sessionStorage.setItem('adminTab', adminTab); } catch { /* private mode */ } }, [adminTab]);
+  // How many NINs are waiting, so the tab can show it.
+  const [kycCount, setKycCount] = useState(0);
+  useEffect(() => { supabase.rpc('admin_kyc_queue').then(({ data }) => setKycCount((data || []).length)); }, []);
   const [searchUsername, setSearchUsername] = useState('');
   const [lookupResult, setLookupResult] = useState(null);
   const [lookupError, setLookupError] = useState('');
@@ -3856,12 +3970,18 @@ function AdminScreen() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold">Admin</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">Admin</h1>
+        <button onClick={onRefresh} className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 transition active:scale-[0.97]">
+          <RefreshCw className="w-3.5 h-3.5" /> Refresh
+        </button>
+      </div>
 
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
         {[
           { key: 'overview', label: 'Overview' },
           { key: 'payment', label: 'Payment Settling' },
+          { key: 'kyc', label: kycCount > 0 ? `ID review (${kycCount})` : 'ID review' },
           { key: 'crypto', label: 'Crypto Settling' },
           { key: 'sweeping', label: 'Sweeping' },
           { key: 'transactions', label: 'Transactions' },
@@ -4161,6 +4281,8 @@ function AdminScreen() {
         </PrimaryButton>
       </div>
       )}
+
+      {adminTab === 'kyc' && <KycReviewCard onCount={setKycCount} />}
 
       {adminTab === 'payment' && <GuestLinksAdminCard />}
 
@@ -4857,7 +4979,7 @@ function UsernameScreen({ onBack, currentUsername, onChanged }) {
   );
 }
 
-function SecurityScreen({ onBack }) {
+function SecurityScreen({ onBack, onPinSet }) {
   const [newPassword, setNewPassword] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState('');
@@ -4892,6 +5014,7 @@ function SecurityScreen({ onBack }) {
     try {
       await setTransactionPin(pin);
       setPinSuccess(true);
+      if (onPinSet) onPinSet();
       setPin('');
     } catch (e) {
       setPinError(e.message);
@@ -4996,6 +5119,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
         </div>
         {pushError && <p className="text-xs text-red-400 mt-2">{pushError}</p>}
       </div>
+
     </div>
   );
 }
@@ -5033,6 +5157,9 @@ function CheckoutPage({ slug }) {
   // Cramming both onto one screen made a long page and buried the payment
   // instructions below a form the customer hadn't filled yet.
   const [checkoutStep, setCheckoutStep] = useState('details');
+  // Bank details are shown only after the payer taps Pay now, so the 15-minute
+  // window starts when they're actually about to transfer.
+  const [bankRevealed, setBankRevealed] = useState(false);
 
   // A number typed while on one tab means a different currency on another —
   // reset on switch so it's never misread (e.g. a naira figure silently
@@ -5128,11 +5255,13 @@ function CheckoutPage({ slug }) {
     return corrections[domain] ? `Did you mean ${e.split('@')[0]}@${corrections[domain]}?` : '';
   })();
   const custPhoneValid = !custPhone || /^0\d{10}$/.test(custPhone.replace(/\s/g, ''));
-  const customerDetailsComplete = !isBusinessOrder || (
+  const customerDetailsComplete = isBusinessOrder ? (
     custName.trim().length > 0 &&
     (custEmail.trim() || custPhone.trim()) &&
     custEmailValid && custPhoneValid &&
     (!needsAddress || custAddress.trim().length > 0)
+  ) : (
+    custName.trim().length > 1 && custEmail.trim().length > 0 && custEmailValid
   );
 
   const handleSent = async (method) => {
@@ -5145,8 +5274,8 @@ function CheckoutPage({ slug }) {
           slug, method,
           crypto_asset: method === 'crypto' ? cryptoAsset : undefined,
           claimed_amount: amountNgn || undefined,
-          customer_name: isBusinessOrder ? custName.trim() : undefined,
-          customer_email: isBusinessOrder && custEmail.trim() ? custEmail.trim() : undefined,
+          customer_name: custName.trim() || undefined,
+          customer_email: custEmail.trim() || undefined,
           customer_phone: isBusinessOrder && custPhone.trim() ? custPhone.trim() : undefined,
           delivery_address: needsAddress && custAddress.trim() ? custAddress.trim() : undefined,
           idempotency_key: idemKey,
@@ -5250,12 +5379,14 @@ function CheckoutPage({ slug }) {
             </div>
           )}
 
-          {isBusinessOrder && checkoutStep === 'details' && (
+          {checkoutStep === 'details' && (
             <div>
               <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-4">
                 <div className="text-xs font-semibold mb-1">Your details</div>
                 <p className="text-[11px] text-neutral-500 mb-3">
-                  So {link.business_name} can confirm your order and reach you about it.
+                  {isBusinessOrder
+                    ? `So ${link.business_name} can confirm your order and reach you about it.`
+                    : `So ${link.is_guest ? link.creator_username : '@' + link.creator_username} knows who paid, and we can email your receipt.`}
                 </p>
                 <div className="space-y-2.5">
                   <input
@@ -5280,13 +5411,13 @@ function CheckoutPage({ slug }) {
                       {emailTypoHint} <span className="underline">Tap to fix</span>
                     </button>
                   )}
-                  <input
+                  {isBusinessOrder && <input
                     inputMode="numeric"
                     value={custPhone}
                     onChange={e => setCustPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
                     placeholder="Phone number"
                     className={`w-full bg-neutral-900 border rounded-xl px-3.5 py-2.5 text-sm outline-none placeholder-neutral-600 ${custPhone && !custPhoneValid ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`}
-                  />
+                  />}
                   {needsAddress && (
                     <textarea
                       value={custAddress}
@@ -5298,9 +5429,9 @@ function CheckoutPage({ slug }) {
                   )}
                 </div>
                 {custEmail.trim() && (
-                  <p className="text-[11px] text-neutral-600 mt-2.5">We'll email your receipt and order details here.</p>
+                  <p className="text-[11px] text-neutral-600 mt-2.5">We'll email your receipt{isBusinessOrder ? ' and order details' : ''} here.</p>
                 )}
-                {!custEmail.trim() && !custPhone.trim() && (
+                {isBusinessOrder && !custEmail.trim() && !custPhone.trim() && (
                   <p className="text-[11px] text-neutral-600 mt-2.5">Add an email or phone number so they can reach you.</p>
                 )}
               </div>
@@ -5314,8 +5445,8 @@ function CheckoutPage({ slug }) {
             </div>
           )}
 
-          {(!isBusinessOrder || checkoutStep === 'payment') && (<>
-          {isBusinessOrder && (
+          {checkoutStep === 'payment' && (<>
+          {(
             <button
               onClick={() => setCheckoutStep('details')}
               className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-white transition mb-4"
@@ -5330,7 +5461,21 @@ function CheckoutPage({ slug }) {
             <button onClick={() => setPayTab('crypto')} className={`rounded-xl py-2.5 text-xs font-semibold transition ${payTab === 'crypto' ? 'bg-white text-black' : 'bg-neutral-900 border border-neutral-800 text-neutral-400'}`}>Crypto</button>
           </div>
 
-          {payTab === 'naira' && (
+          {payTab === 'naira' && !bankRevealed && (
+            <div>
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
+                <div className="flex items-center gap-2 text-sm font-medium mb-1.5"><Landmark className="w-4 h-4 text-neutral-400" /> Pay by bank transfer</div>
+                <p className="text-xs text-neutral-400 leading-relaxed">
+                  After you continue, we'll show the bank account to transfer to and the reference to use for this payment. You'll have 15 minutes to complete the transfer.
+                </p>
+              </div>
+              <PrimaryButton onClick={() => { setBankRevealed(true); setSecondsLeft(15 * 60); }} disabled={link.link_type === 'flexible' && amountNgn <= 0}>
+                Pay now
+              </PrimaryButton>
+            </div>
+          )}
+
+          {payTab === 'naira' && bankRevealed && (
             <div>
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3 mb-4">
                 <div className="flex justify-between text-sm"><span className="text-neutral-500">Bank</span><span className="font-medium">Moniepoint</span></div>
@@ -5611,8 +5756,8 @@ function VerificationModal({ onClose, userId }) {
         {info === null ? (
           <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-neutral-600" /></div>
 
-        ) : step === 'status' && (info.kyc_status === 'submitted' || info.kyc_status === 'verified') ? (
-          // Verified or submitted: shows like normal, no limit warnings at all.
+        ) : step === 'status' && info.kyc_status === 'verified' ? (
+          // Verified (approved after review): no limits.
           <div className="text-center">
             <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
               <ShieldCheck className="w-6 h-6 text-emerald-400" />
@@ -5623,6 +5768,37 @@ function VerificationModal({ onClose, userId }) {
               <button onClick={() => setStep('reveal-pin')} className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 mb-5 text-left">
                 <span className="text-sm text-neutral-400">NIN on file</span>
                 <span className="text-sm font-mono">•••••••••••</span>
+              </button>
+            )}
+            <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+          </div>
+
+        ) : step === 'status' && info.kyc_status === 'submitted' ? (
+          // NIN submitted and waiting for review. Still on the receiving limit until it's approved.
+          <div>
+            <div className="text-center mb-5">
+              <div className="w-14 h-14 rounded-full bg-amber-500/15 flex items-center justify-center mx-auto mb-4">
+                <ShieldCheck className="w-6 h-6 text-amber-400" />
+              </div>
+              <h2 className="text-lg font-bold mb-1">NIN submitted</h2>
+              <p className="text-sm text-neutral-500">We're reviewing it. We'll notify you as soon as it's approved.</p>
+            </div>
+            {info.limit_cap > 0 && (
+              <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 mb-5">
+                <div className="flex justify-between text-xs text-neutral-500 mb-2">
+                  <span>Received so far</span>
+                  <span>{fmtNaira(info.limit_used)} of {fmtNaira(info.limit_cap)}</span>
+                </div>
+                <div className="h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-400 rounded-full" style={{ width: `${Math.min(100, (info.limit_used / info.limit_cap) * 100)}%` }} />
+                </div>
+                <div className="text-xs text-neutral-500 mt-2">The limit lifts once you're approved. You can always spend what's in your balance.</div>
+              </div>
+            )}
+            {info.has_nin && (
+              <button onClick={() => setStep('reveal-pin')} className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 mb-5 text-left">
+                <span className="text-sm text-neutral-400">NIN on file</span>
+                <span className="text-sm font-mono">{'\u2022'.repeat(11)}</span>
               </button>
             )}
             <PrimaryButton onClick={onClose}>Done</PrimaryButton>
@@ -5646,12 +5822,12 @@ function VerificationModal({ onClose, userId }) {
                 <ShieldCheck className="w-6 h-6 text-amber-400" />
               </div>
               <h2 className="text-lg font-bold mb-1">Not yet verified</h2>
-              <p className="text-sm text-neutral-500">Add your NIN to remove your transaction limit.</p>
+              <p className="text-sm text-neutral-500">Add your NIN to remove your receiving limit.</p>
             </div>
 
             <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 mb-5">
               <div className="flex justify-between text-xs text-neutral-500 mb-2">
-                <span>Lifetime limit</span>
+                <span>Received so far</span>
                 <span>{fmtNaira(info.limit_used)} of {fmtNaira(info.limit_cap)}</span>
               </div>
               <div className="h-1.5 bg-neutral-800 rounded-full overflow-hidden">
@@ -5660,7 +5836,7 @@ function VerificationModal({ onClose, userId }) {
                   style={{ width: `${Math.min(100, (info.limit_used / info.limit_cap) * 100)}%` }}
                 />
               </div>
-              <div className="text-xs text-neutral-500 mt-2">{fmtNaira(info.limit_remaining)} remaining until verified</div>
+              <div className="text-xs text-neutral-500 mt-2">{fmtNaira(info.limit_remaining)} more you can receive before you verify. You can always spend what's in your balance.</div>
             </div>
 
             <PrimaryButton onClick={() => setStep('submit-form')}>Add your NIN</PrimaryButton>
@@ -6098,6 +6274,8 @@ function MobileAppRoot() {
   const [showAddToHomeScreen, setShowAddToHomeScreen] = useState(false);
   const [tab, setTab] = useState('home');
   const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | notifications
+  const [adminRefreshKey, setAdminRefreshKey] = useState(0);
+  const [resetEmail, setResetEmail] = useState('');   // set when a signup hits an existing account
   const [sendAgainUsername, setSendAgainUsername] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const [profileView, setProfileView] = useState('main'); // main | rates | support | username | security | settings | account
@@ -6204,8 +6382,8 @@ function MobileAppRoot() {
   if (screen === 'splash') return <SplashScreen />;
 
   if (screen === 'login') return <LoginScreen onLogin={() => {}} goSignup={() => setScreen('signup')} goForgot={() => setScreen('forgot')} />;
-  if (screen === 'signup') return <SignupScreen onSignup={() => {}} goLogin={() => setScreen('login')} initialReferralCode={referralFromUrl} />;
-  if (screen === 'forgot') return <ForgotScreen onDone={finishPasswordReset} goLogin={() => setScreen('login')} />;
+  if (screen === 'signup') return <SignupScreen onSignup={() => {}} onExistingAccount={(em) => { setResetEmail(em); setScreen('forgot'); }} goLogin={() => setScreen('login')} initialReferralCode={referralFromUrl} />;
+  if (screen === 'forgot') return <ForgotScreen key={resetEmail || 'blank'} prefillEmail={resetEmail || undefined} onDone={() => { setResetEmail(''); return finishPasswordReset(); }} goLogin={() => { setResetEmail(''); setScreen('login'); }} />;
   if (screen === 'forgotSent') return <ForgotSentScreen goLogin={() => setScreen('login')} />;
   if (screen === 'welcome') return <WelcomeScreen onContinue={handleWelcomeContinue} />;
 
@@ -6248,6 +6426,7 @@ function MobileAppRoot() {
           onBack={() => { setSendAgainUsername(''); setHomeView('main'); }}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setSendAgainUsername(''); setHomeView('main'); }}
           hasPin={!!profile?.pin_hash}
+          onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
           initialUsername={sendAgainUsername}
         />
       )}
@@ -6265,6 +6444,7 @@ function MobileAppRoot() {
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
           hasPin={!!profile?.pin_hash}
+          onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
         />
       )}
       {tab === 'home' && homeView === 'electricity' && (
@@ -6272,6 +6452,7 @@ function MobileAppRoot() {
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
           hasPin={!!profile?.pin_hash}
+          onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
         />
       )}
       {tab === 'home' && homeView === 'airtime' && (
@@ -6279,6 +6460,7 @@ function MobileAppRoot() {
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
           hasPin={!!profile?.pin_hash}
+          onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
         />
       )}
       {tab === 'home' && homeView === 'data' && (
@@ -6286,6 +6468,7 @@ function MobileAppRoot() {
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
           hasPin={!!profile?.pin_hash}
+          onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
         />
       )}
       {tab === 'home' && homeView === 'history' && (
@@ -6316,7 +6499,7 @@ function MobileAppRoot() {
       )}
       {tab === 'crypto' && <CryptoScreen />}
       {tab === 'cards' && <CardsScreen fullName={profile?.full_name || ''} />}
-      {tab === 'admin' && profile?.is_admin === true && <AdminScreen />}
+      {tab === 'admin' && profile?.is_admin === true && <AdminScreen key={adminRefreshKey} onRefresh={() => setAdminRefreshKey(k => k + 1)} />}
 
       {tab === 'profile' && profileView === 'main' && (
         <ProfileScreen
@@ -6343,7 +6526,7 @@ function MobileAppRoot() {
           onChanged={() => { if (profile?.id) loadUserData(profile.id); }}
         />
       )}
-      {tab === 'profile' && profileView === 'security' && <SecurityScreen onBack={() => setProfileView('main')} />}
+      {tab === 'profile' && profileView === 'security' && <SecurityScreen onBack={() => setProfileView('main')} onPinSet={() => { if (profile?.id) loadUserData(profile.id); }} />}
       {tab === 'profile' && profileView === 'settings' && (
         <SettingsScreen
           onBack={() => setProfileView('main')}
