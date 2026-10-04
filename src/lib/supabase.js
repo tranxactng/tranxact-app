@@ -56,6 +56,27 @@ export async function getCryptoAssets() {
   return { data, error };
 }
 
+// Payments that came in through guest payment links before this person had an
+// account went through Tranxact's holding wallet, not their own, so they aren't
+// in their wallet's ledger. This adds them to the activity list after a claim.
+async function getClaimedGuestHistory(from = null, to = null) {
+  const { data, error } = await supabase.rpc('get_my_guest_history', { p_from: from, p_to: to });
+  if (error || !data) return [];
+  return data.map(g => ({
+    id: g.id,
+    type: g.type,
+    status: g.status,
+    amount_ngn: g.amount_ngn,
+    crypto_asset: null,
+    counterparty: null,
+    direction: Number(g.amount_ngn) > 0 ? 'received' : 'sent',
+    description: g.description,
+    created_at: g.created_at,
+  }));
+}
+
+const byNewest = (a, b) => new Date(b.created_at) - new Date(a.created_at);
+
 export async function getRecentTransactions(userId, limit = 20) {
   const { data: wallet, error: walletErr } = await supabase
     .from('wallets')
@@ -111,7 +132,8 @@ export async function getRecentTransactions(userId, limit = 20) {
     };
   });
 
-  return { data: mapped, error: null };
+  const guest = await getClaimedGuestHistory();
+  return { data: [...mapped, ...guest].sort(byNewest).slice(0, limit), error: null };
 }
 
 // A real, complete month of history — no small cap, since "See all" showing
@@ -169,7 +191,8 @@ export async function getTransactionsForMonth(userId, year, month) {
     };
   });
 
-  return { data: mapped, error: null };
+  const guest = await getClaimedGuestHistory(startOfMonth, startOfNextMonth);
+  return { data: [...mapped, ...guest].sort(byNewest), error: null };
 }
 
 // Calls the deployed edge function to send naira to another Tranxact user by username.
