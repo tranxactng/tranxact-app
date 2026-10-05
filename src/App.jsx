@@ -9,7 +9,7 @@ import {
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
   getProfile, getWallet, getCryptoAssets, getDepositAddress, getRecentTransactions, getTransactionsForMonth, sendToUser, buyAirtime, getServiceVariations, buyData, verifyMeter, buyElectricity, buyTV,
-  adminLookupUser, adminRecentSettlements, adminSettle, adminListPaymentNotices, adminGetOverviewStats,
+  adminLookupUser, adminRecentSettlements, adminSettle, adminNoticeAction, setPaymentLinkActive, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminSweepBtc, adminCheckSolBalance,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
@@ -517,24 +517,6 @@ function SplashScreen() {
   );
 }
 
-function WelcomeScreen({ onContinue }) {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setVisible(true), 30);
-    return () => clearTimeout(t);
-  }, []);
-  return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-6 text-center">
-      <div className={`flex flex-col items-center transition-all duration-700 ease-out ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
-        <LogoMark size={40} />
-        <h1 className="text-2xl font-bold mt-6 mb-2">Welcome to Tranxact 👋</h1>
-        <p className="text-neutral-400 text-sm mb-10 max-w-xs">Your seamless way to move money and crypto.</p>
-        <PrimaryButton onClick={onContinue} className="max-w-xs">Get Started</PrimaryButton>
-      </div>
-    </div>
-  );
-}
-
 // Real standalone-mode detection — true only when actually running as an
 // installed PWA, covering both the standard media query and iOS Safari's
 // older, non-standard navigator flag.
@@ -616,6 +598,7 @@ function LoginScreen({ onLogin, goSignup, goForgot, isDashboard }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -695,6 +678,7 @@ function SignupCodeScreen({ email, onChangeEmail, isDashboard }) {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [note, setNote] = useState('');
   const [cooldown, setCooldown] = useState(60);
 
@@ -753,6 +737,7 @@ function SignupScreen({ onSignup, onExistingAccount, goLogin, initialReferralCod
   const [businessName, setBusinessName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -838,6 +823,7 @@ function ForgotScreen({ onDone, goLogin, isDashboard, prefillEmail }) {
   const [verified, setVerified] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [note, setNote] = useState('');
   const [cooldown, setCooldown] = useState(prefillEmail ? 60 : 0);
 
@@ -1137,6 +1123,7 @@ const ReceiptCard = React.forwardRef(({ tx }, ref) => {
 function ShareReceiptScreen({ tx, onBack }) {
   const [busy, setBusy] = useState(''); // '' | 'image' | 'pdf'
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const cardRef = useRef(null);
 
   // html2canvas has a longstanding, well-documented issue with base64 data-URI
@@ -1594,6 +1581,7 @@ function CryptoReceivePanel() {
   const [address, setAddress] = useState(null);
   const [addressLoading, setAddressLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -1834,9 +1822,11 @@ function TVScreen({ onBack, onDone, hasPin, onSetupPin }) {
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
+  useClearOnEdit(pinError, setPinError);
   const [pinLoading, setPinLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [result, setResult] = useState(null);
 
   const validPhone = /^0\d{10}$/.test(phone);
@@ -2069,9 +2059,11 @@ function ElectricityScreen({ onBack, onDone, hasPin, onSetupPin }) {
   const [verifiedCustomer, setVerifiedCustomer] = useState(null);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
+  useClearOnEdit(pinError, setPinError);
   const [pinLoading, setPinLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [result, setResult] = useState(null);
 
   const validPhone = /^0\d{10}$/.test(phone);
@@ -2285,9 +2277,11 @@ function AirtimeScreen({ onBack, onDone, hasPin, onSetupPin }) {
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
+  useClearOnEdit(pinError, setPinError);
   const [pinLoading, setPinLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [result, setResult] = useState(null); // { status, amount } once we actually hear back
 
   const validPhone = /^0\d{10}$/.test(phone);
@@ -2491,9 +2485,11 @@ function DataScreen({ onBack, onDone, hasPin, onSetupPin }) {
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
+  useClearOnEdit(pinError, setPinError);
   const [pinLoading, setPinLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [result, setResult] = useState(null);
 
   useEffect(() => {
@@ -2697,13 +2693,16 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
+  useClearOnEdit(pinError, setPinError);
   const [pinLoading, setPinLoading] = useState(false);
 
   const [resolvedName, setResolvedName] = useState('');
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState('');
+  useClearOnEdit(resolveError, setResolveError);
 
   useEffect(() => {
     if (mode !== 'bank' || banks !== null) return;
@@ -2920,7 +2919,12 @@ function TranxactPayScreen({ onClose, username }) {
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('fixed');
   const [newAmount, setNewAmount] = useState('');
+  const [newMode, setNewMode] = useState('one_time');
+  const [modeTouched, setModeTouched] = useState(false);
+  const [toggleBusy, setToggleBusy] = useState(null);
+  const [toggleError, setToggleError] = useState({});
   const [createError, setCreateError] = useState('');
+  useClearOnEdit(createError, setCreateError);
   const [justCreated, setJustCreated] = useState(null);
 
   const [tipLink, setTipLink] = useState(undefined); // undefined = loading, null = none yet
@@ -2962,6 +2966,7 @@ function TranxactPayScreen({ onClose, username }) {
       const res = await createPaymentLink({
         title: newTitle,
         link_type: newType,
+        link_mode: newMode,
         amount: newType === 'fixed' ? Number(newAmount) : undefined,
       });
       setJustCreated(res);
@@ -2972,6 +2977,19 @@ function TranxactPayScreen({ onClose, username }) {
       setCreateError(e.message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleToggle = async (link) => {
+    setToggleError(prev => ({ ...prev, [link.id]: '' }));
+    setToggleBusy(link.id);
+    try {
+      await setPaymentLinkActive(link.id, link.status !== 'active');
+      await loadLinks();
+    } catch (e) {
+      setToggleError(prev => ({ ...prev, [link.id]: e.message }));
+    } finally {
+      setToggleBusy(null);
     }
   };
 
@@ -3016,9 +3034,17 @@ function TranxactPayScreen({ onClose, username }) {
       <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium">{link.title}</span>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${link.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>{link.status}</span>
+          <span data-link-status className={`text-xs px-2 py-0.5 rounded-full ${link.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>{link.link_mode === 'one_time' && link.status === 'closed' ? 'paid · closed' : link.status}</span>
         </div>
-        <div className="text-xs text-neutral-500 mb-3 font-mono">{link.link_type === 'fixed' ? fmtNaira(link.amount) : 'Flexible amount'}</div>
+        <div className="text-xs text-neutral-500 mb-1 font-mono">{link.link_type === 'fixed' ? fmtNaira(link.amount) : 'Flexible amount'}</div>
+        <div className="text-[11px] text-neutral-600 mb-3">{link.link_mode === 'recurring' ? 'Recurring · stays open for repeat payments' : 'One-time · closes after it is paid'}</div>
+        {link.link_mode === 'recurring' && link.status !== 'closed' && (
+          <div className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 mb-3" data-link-toggle>
+            <span className="text-xs text-neutral-400">{link.paused_by_limit ? 'Paused: receiving limit reached' : 'Accepting payments'}</span>
+            <button onClick={() => handleToggle(link)} disabled={toggleBusy === link.id || link.paused_by_limit} aria-label={link.status === 'active' ? 'Turn this link off' : 'Turn this link on'} className={`px-3.5 py-1 rounded-full text-xs font-semibold transition ${link.status === 'active' ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-300'} ${link.paused_by_limit ? 'opacity-40' : ''}`}>{toggleBusy === link.id ? '…' : link.status === 'active' ? 'On' : 'Off'}</button>
+          </div>
+        )}
+        {toggleError[link.id] && <p className="text-xs text-red-400 mb-2">{toggleError[link.id]}</p>}
 
         {showingQr && (
           <div className="flex flex-col items-center bg-neutral-950 border border-neutral-800 rounded-lg p-4 mb-3">
@@ -3089,8 +3115,15 @@ function TranxactPayScreen({ onClose, username }) {
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3">
               <Field label="Title" value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="What's this for?" />
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => setNewType('fixed')} className={`rounded-xl py-2.5 text-xs font-medium border transition ${newType === 'fixed' ? 'bg-white text-black border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>Fixed amount</button>
-                <button onClick={() => setNewType('flexible')} className={`rounded-xl py-2.5 text-xs font-medium border transition ${newType === 'flexible' ? 'bg-white text-black border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>Flexible amount</button>
+                <button onClick={() => { setNewType('fixed'); if (!modeTouched) setNewMode('one_time'); }} className={`rounded-xl py-2.5 text-xs font-medium border transition ${newType === 'fixed' ? 'bg-white text-black border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>Fixed amount</button>
+                <button onClick={() => { setNewType('flexible'); if (!modeTouched) setNewMode('recurring'); }} className={`rounded-xl py-2.5 text-xs font-medium border transition ${newType === 'flexible' ? 'bg-white text-black border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>Flexible amount</button>
+              </div>
+              <div data-link-mode>
+                <div className="text-xs text-neutral-500 mb-2">How often can it be paid?</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => { setNewMode('one_time'); setModeTouched(true); }} className={`rounded-xl py-2.5 px-2 text-xs font-medium border transition ${newMode === 'one_time' ? 'bg-white text-black border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>One-time<span className="block text-[10px] font-normal opacity-70 mt-0.5">Closes after it is paid</span></button>
+                  <button onClick={() => { setNewMode('recurring'); setModeTouched(true); }} className={`rounded-xl py-2.5 px-2 text-xs font-medium border transition ${newMode === 'recurring' ? 'bg-white text-black border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>Recurring<span className="block text-[10px] font-normal opacity-70 mt-0.5">Stays open until you turn it off</span></button>
+                </div>
               </div>
               {newType === 'fixed' && <Field label="Amount (NGN)" type="number" value={newAmount} onChange={e => setNewAmount(e.target.value)} placeholder="0.00" />}
               {createError && <p className="text-sm text-red-400">{createError}</p>}
@@ -3102,7 +3135,8 @@ function TranxactPayScreen({ onClose, username }) {
             {justCreated && (
               <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4 text-center">
                 <div className="bg-white rounded-lg p-1.5 mb-3 inline-block"><BrandedQR data={justCreated.url} size={112} /></div>
-                <div className="text-violet-300 text-xs font-mono break-all mb-3">{justCreated.url}</div>
+                <div className="text-violet-300 text-xs font-mono break-all mb-1">{justCreated.url}</div>
+                <div className="text-[11px] text-neutral-500 mb-3">{justCreated.link_mode === 'recurring' ? 'Recurring link. It stays open until you turn it off.' : 'One-time link. It closes after it is paid.'}</div>
                 <div className="grid grid-cols-2 gap-2">
                   <GhostButton onClick={() => copy(justCreated.url, 'new')}>
                     {copied === 'new' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied === 'new' ? 'Copied' : 'Copy'}
@@ -3191,6 +3225,7 @@ function RatesScreen({ onBack }) {
   const [tab, setTab] = useState('rates');
   const [rates, setRates] = useState(null);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [now, setNow] = useState(Date.now());
   const [calcAsset, setCalcAsset] = useState('USDT');
@@ -3375,6 +3410,7 @@ function GuestLinksAdminCard() {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  useClearOnEdit(err, setErr);
 
   const load = async () => {
     const { data, error } = await supabase.rpc('admin_guest_links_status');
@@ -3446,6 +3482,7 @@ function GuestLinksAdminCard() {
 function KycReviewCard({ onCount }) {
   const [items, setItems] = useState(null);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [busyId, setBusyId] = useState(null);
   const [copied, setCopied] = useState(null);
 
@@ -3519,6 +3556,61 @@ function KycReviewCard({ onCount }) {
   );
 }
 
+// Admin: leads from "Talk to sales" (website form and app). Newest first.
+const LEAD_INTEREST = { events: 'Event payments', business_setup: 'Business payment setup', other: 'Something else' };
+function leadWhatsApp(phone) {
+  const d = String(phone || '').replace(/\D/g, '');
+  if (d.length < 7) return null;
+  return `https://wa.me/${d.startsWith('0') ? '234' + d.slice(1) : d}`;
+}
+function SalesLeadsCard({ leads, busyId, onStatus }) {
+  const fresh = (leads || []).filter(l => l.status === 'new').length;
+  return (
+    <div>
+      <h2 className="text-sm font-semibold mb-3">Sales Leads{fresh > 0 ? <span className="ml-2 text-xs font-medium text-emerald-400">{fresh} new</span> : null}</h2>
+      {leads === null ? (
+        <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+      ) : leads.length === 0 ? (
+        <p className="text-sm text-neutral-500">No sales leads yet.</p>
+      ) : (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
+          {leads.map(l => {
+            const wa = leadWhatsApp(l.phone);
+            return (
+              <div key={l.id} className="px-4 py-3">
+                <div className="flex items-center justify-between gap-3 mb-1">
+                  <span className="text-sm font-medium truncate">{l.name}</span>
+                  <select
+                    value={l.status}
+                    onChange={e => onStatus(l.id, e.target.value)}
+                    disabled={busyId === l.id}
+                    className={`border rounded-full px-2 py-1 text-xs flex-shrink-0 ${l.status === 'new' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-neutral-900 border-neutral-800 text-neutral-300'}`}
+                  >
+                    <option value="new">New</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                </div>
+                <div className="text-xs text-neutral-500 mb-1.5 break-all">{l.email}{l.phone ? ` · ${l.phone}` : ''}</div>
+                <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                  {l.interest && LEAD_INTEREST[l.interest] && <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300">{LEAD_INTEREST[l.interest]}</span>}
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-900 text-neutral-400">{l.source === 'website' ? 'Website' : 'App'}</span>
+                  <span className="text-[10px] text-neutral-600">{l.created_at ? new Date(l.created_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                </div>
+                {l.message && <div className="text-xs text-neutral-400 whitespace-pre-wrap break-words">{l.message}</div>}
+                <div className="flex gap-2 mt-2.5">
+                  <a href={`mailto:${l.email}`} className="text-xs border border-neutral-800 rounded-full px-3 py-1 text-neutral-300">Email</a>
+                  {wa && <a href={wa} target="_blank" rel="noreferrer" className="text-xs border border-neutral-800 rounded-full px-3 py-1 text-neutral-300">WhatsApp</a>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminScreen({ onRefresh }) {
   // Remember the open tab, so Refresh (which reloads everything) keeps you where you were.
   const [adminTab, setAdminTab] = useState(() => {
@@ -3531,6 +3623,7 @@ function AdminScreen({ onRefresh }) {
   const [searchUsername, setSearchUsername] = useState('');
   const [lookupResult, setLookupResult] = useState(null);
   const [lookupError, setLookupError] = useState('');
+  useClearOnEdit(lookupError, setLookupError);
   const [lookupLoading, setLookupLoading] = useState(false);
 
   const [msgHeading, setMsgHeading] = useState('');
@@ -3541,6 +3634,7 @@ function AdminScreen({ onRefresh }) {
   const [msgSending, setMsgSending] = useState(false);
   const [msgResult, setMsgResult] = useState(null);
   const [msgError, setMsgError] = useState('');
+  useClearOnEdit(msgError, setMsgError);
   const [confirmingBroadcast, setConfirmingBroadcast] = useState(null); // null | 'users' | 'waitlist'
 
   const [settleType, setSettleType] = useState('crypto_deposit');
@@ -3550,6 +3644,7 @@ function AdminScreen({ onRefresh }) {
   const [description, setDescription] = useState('');
   const [settleLoading, setSettleLoading] = useState(false);
   const [settleError, setSettleError] = useState('');
+  useClearOnEdit(settleError, setSettleError);
   const [settleSuccess, setSettleSuccess] = useState(null);
   const [rates, setRates] = useState(null);
 
@@ -3562,6 +3657,7 @@ function AdminScreen({ onRefresh }) {
   const [tpBankAmount, setTpBankAmount] = useState('');
   const [tpLoading, setTpLoading] = useState(false);
   const [tpError, setTpError] = useState('');
+  useClearOnEdit(tpError, setTpError);
   const [tpSuccess, setTpSuccess] = useState(null);
   const [pendingNotices, setPendingNotices] = useState(null);
   const [stats, setStats] = useState(null);
@@ -3573,22 +3669,26 @@ function AdminScreen({ onRefresh }) {
   const [baseRateInput, setBaseRateInput] = useState('');
   const [rateSaving, setRateSaving] = useState(false);
   const [rateError, setRateError] = useState('');
+  useClearOnEdit(rateError, setRateError);
   const [rateSaved, setRateSaved] = useState(false);
   const [spreadInputs, setSpreadInputs] = useState({});
   const [spreadSaving, setSpreadSaving] = useState(null);
   const [spreadError, setSpreadError] = useState('');
+  useClearOnEdit(spreadError, setSpreadError);
   const [pkUsername, setPkUsername] = useState('');
   const [pkAsset, setPkAsset] = useState('BTC');
   const [pkConfirming, setPkConfirming] = useState(false);
   const [pkLoading, setPkLoading] = useState(false);
   const [pkResult, setPkResult] = useState(null);
   const [pkError, setPkError] = useState('');
+  useClearOnEdit(pkError, setPkError);
   const [swUsername, setSwUsername] = useState('');
   const [swAsset, setSwAsset] = useState('ETH');
   const [swNetwork, setSwNetwork] = useState('ERC20');
   const [swChecking, setSwChecking] = useState(false);
   const [swResult, setSwResult] = useState(null);
   const [swError, setSwError] = useState('');
+  useClearOnEdit(swError, setSwError);
   const [swConfirmingSweep, setSwConfirmingSweep] = useState(false);
   const [swSweeping, setSwSweeping] = useState(false);
   const [swSweepResult, setSwSweepResult] = useState(null);
@@ -3597,12 +3697,14 @@ function AdminScreen({ onRefresh }) {
   const [trChecking, setTrChecking] = useState(false);
   const [trResult, setTrResult] = useState(null);
   const [trError, setTrError] = useState('');
+  useClearOnEdit(trError, setTrError);
   const [trSweeping, setTrSweeping] = useState(false);
   const [trConfirmingSweep, setTrConfirmingSweep] = useState(false);
   const [btcUsername, setBtcUsername] = useState('');
   const [btcChecking, setBtcChecking] = useState(false);
   const [btcResult, setBtcResult] = useState(null);
   const [btcError, setBtcError] = useState('');
+  useClearOnEdit(btcError, setBtcError);
   const [btcSweeping, setBtcSweeping] = useState(false);
   const [btcConfirmingSweep, setBtcConfirmingSweep] = useState(false);
   const [solUsername, setSolUsername] = useState('');
@@ -3610,6 +3712,7 @@ function AdminScreen({ onRefresh }) {
   const [solChecking, setSolChecking] = useState(false);
   const [solResult, setSolResult] = useState(null);
   const [solError, setSolError] = useState('');
+  useClearOnEdit(solError, setSolError);
 
   const loadStats = async () => {
     try {
@@ -3986,7 +4089,7 @@ function AdminScreen({ onRefresh }) {
           { key: 'sweeping', label: 'Sweeping' },
           { key: 'transactions', label: 'Transactions' },
           { key: 'notifications', label: 'Notifications' },
-          { key: 'other', label: 'Other' },
+          { key: 'other', label: (salesLeads || []).filter(l => l.status === 'new').length > 0 ? `Other (${(salesLeads || []).filter(l => l.status === 'new').length})` : 'Other' },
         ].map(t => (
           <button
             key={t.key}
@@ -4293,60 +4396,9 @@ function AdminScreen({ onRefresh }) {
           <span className="text-xs text-violet-300 font-medium">TranxactPay Payments</span>
         </div>
 
-        {pendingNotices === null ? (
-          <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-neutral-500" /></div>
-        ) : pendingNotices.length > 0 ? (
-          <div className="mb-4 space-y-2">
-            <p className="text-xs text-neutral-500 mb-1">Awaiting confirmation. Tap to pre-fill the claim below, verify against what actually arrived, then Settle</p>
-            {pendingNotices.map(n => (
-              <button
-                key={n.id}
-                onClick={() => {
-                  setTpLinkSlug(n.link_slug || '');
-                  const method = n.method === 'crypto' ? 'crypto_deposit' : 'fund_bank';
-                  setTpMethod(method);
-                  if (method === 'crypto_deposit') {
-                    if (n.crypto_asset) setTpCryptoAsset(n.crypto_asset);
-                    const rateRow = rates?.find(r => r.coin === n.crypto_asset);
-                    if (rateRow && n.claimed_amount) {
-                      setTpAmountUsd((Number(n.claimed_amount) / Number(rateRow.effective_rate)).toFixed(2));
-                    }
-                  } else {
-                    setTpBankAmount(n.claimed_amount ? String(n.claimed_amount) : '');
-                  }
-                }}
-                className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-left hover:border-violet-500/40 transition"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="text-sm font-medium">{n.link_title || n.link_slug}</div>
-                    {n.is_storefront && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 uppercase flex-shrink-0">
-                        {n.cart_items?.length > 0 ? 'Cart' : n.product_type || 'Storefront'}
-                      </span>
-                    )}
-                    {n.sold_out && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 uppercase flex-shrink-0">Sold out</span>
-                    )}
-                    {!n.sold_out && n.inventory !== null && n.inventory <= 5 && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 uppercase flex-shrink-0">{n.inventory} left</span>
-                    )}
-                  </div>
-                  {n.cart_items?.length > 0 && (
-                    <div className="text-[11px] text-neutral-500 mt-0.5">
-                      {n.cart_items.map((ci, i) => `${ci.title}${ci.quantity > 1 ? ` ×${ci.quantity}` : ''}`).join(', ')}
-                    </div>
-                  )}
-                  <div className="text-xs text-neutral-500 mt-0.5">@{n.creator_username} · {n.method}{n.crypto_asset ? ` (${n.crypto_asset})` : ''} · claims {n.claimed_amount ? fmtNaira(n.claimed_amount) : '—'}</div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-neutral-600 flex-shrink-0" />
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-neutral-600 mb-4">No payments awaiting confirmation.</p>
-        )}
+        <PaymentNoticesPanel rates={rates} onChanged={() => { loadSettlements(); loadStats(); }} />
 
+        <div className="pt-3 mt-1 border-t border-neutral-900 text-xs font-medium text-neutral-400">Settle manually (a deposit with no notice)</div>
         <div className="pt-3 border-t border-neutral-900 space-y-3">
           <Field label="Payment link slug" value={tpLinkSlug} onChange={e => setTpLinkSlug(e.target.value)} placeholder="e.g. testlink01" />
           <TabToggle
@@ -4435,36 +4487,7 @@ function AdminScreen({ onRefresh }) {
         )}
       </div>
 
-      <div>
-        <h2 className="text-sm font-semibold mb-3">Sales Leads</h2>
-        {salesLeads === null ? (
-          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
-        ) : salesLeads.length === 0 ? (
-          <p className="text-sm text-neutral-500">No sales leads yet.</p>
-        ) : (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
-            {salesLeads.map(l => (
-              <div key={l.id} className="px-4 py-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium">{l.name}</span>
-                  <select
-                    value={l.status}
-                    onChange={e => handleUpdateLeadStatus(l.id, e.target.value)}
-                    disabled={leadActionLoading === l.id}
-                    className="bg-neutral-900 border border-neutral-800 rounded-full px-2 py-1 text-xs text-neutral-300"
-                  >
-                    <option value="new">New</option>
-                    <option value="contacted">Contacted</option>
-                    <option value="closed">Closed</option>
-                  </select>
-                </div>
-                <div className="text-xs text-neutral-500 mb-1">{l.email}</div>
-                {l.message && <div className="text-xs text-neutral-600">{l.message}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <SalesLeadsCard leads={salesLeads} busyId={leadActionLoading} onStatus={handleUpdateLeadStatus} />
 
       <div>
         <h2 className="text-sm font-semibold mb-3">Rate Settings</h2>
@@ -4869,6 +4892,7 @@ function AccountDetailsScreen({ onBack, profile, onUpdated }) {
   const [nameInput, setNameInput] = useState(profile?.full_name || '');
   const [saving, setSaving] = useState(false);
   const [nameError, setNameError] = useState('');
+  useClearOnEdit(nameError, setNameError);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data?.user?.email || ''));
@@ -4943,6 +4967,7 @@ function UsernameScreen({ onBack, currentUsername, onChanged }) {
   const [value, setValue] = useState(currentUsername || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [success, setSuccess] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -4983,11 +5008,13 @@ function SecurityScreen({ onBack, onPinSet }) {
   const [newPassword, setNewPassword] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState('');
+  useClearOnEdit(pwError, setPwError);
   const [pwSuccess, setPwSuccess] = useState(false);
 
   const [pin, setPin] = useState('');
   const [pinLoading, setPinLoading] = useState(false);
   const [pinError, setPinError] = useState('');
+  useClearOnEdit(pinError, setPinError);
   const [pinSuccess, setPinSuccess] = useState(false);
 
   const handlePasswordChange = async (e) => {
@@ -5054,9 +5081,6 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
   const [limitLoading, setLimitLoading] = useState(false);
   const [limitSaved, setLimitSaved] = useState(false);
 
-  const [pushEnabled, setPushEnabled] = useState(initialPushEnabled || false);
-  const [pushLoading, setPushLoading] = useState(false);
-  const [pushError, setPushError] = useState('');
 
   const saveLimit = async () => {
     setLimitLoading(true);
@@ -5066,25 +5090,6 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
       setLimitSaved(true);
     } finally {
       setLimitLoading(false);
-    }
-  };
-
-  const togglePush = async () => {
-    const next = !pushEnabled;
-    setPushError('');
-    setPushLoading(true);
-    try {
-      if (next) {
-        await subscribeToPush();
-      } else {
-        await unsubscribeFromPush();
-      }
-      await updatePushPreference(next);
-      setPushEnabled(next);
-    } catch (e) {
-      setPushError(e.message);
-    } finally {
-      setPushLoading(false);
     }
   };
 
@@ -5103,22 +5108,6 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
         </PrimaryButton>
       </div>
 
-      <div className="pt-6 border-t border-neutral-900">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-semibold">Push notifications</div>
-            <p className="text-xs text-neutral-600 mt-1">Get alerted the moment something happens to your account, even when the app is closed.</p>
-          </div>
-          <button
-            onClick={togglePush}
-            disabled={pushLoading}
-            className={`w-12 h-7 rounded-full flex-shrink-0 flex items-center transition-colors ${pushEnabled ? 'bg-violet-600 justify-end' : 'bg-neutral-800 justify-start'} px-1 disabled:opacity-50`}
-          >
-            <span className="w-5 h-5 rounded-full bg-white block" />
-          </button>
-        </div>
-        {pushError && <p className="text-xs text-red-400 mt-2">{pushError}</p>}
-      </div>
 
     </div>
   );
@@ -5130,6 +5119,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
 function CheckoutPage({ slug }) {
   const [link, setLink] = useState(undefined); // undefined = loading, null = not found
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [flexAmount, setFlexAmount] = useState('');
   const [payTab, setPayTab] = useState('naira'); // naira | card | crypto
   const [cryptoAsset, setCryptoAsset] = useState(null);
@@ -5140,6 +5130,7 @@ function CheckoutPage({ slug }) {
   const [secondsLeft, setSecondsLeft] = useState(15 * 60);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
+  useClearOnEdit(sendError, setSendError);
   const [notice, setNotice] = useState(null);
   // Real customer details — a merchant genuinely can't fulfil an order
   // without knowing who it's from and how to reach them.
@@ -5705,6 +5696,7 @@ function VerificationModal({ onClose, userId }) {
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
   const [revealedNin, setRevealedNin] = useState('');
 
   const load = () => { getKycInfo(userId).then(({ data }) => setInfo(data)); };
@@ -5956,7 +5948,372 @@ function SupportScreen({ onBack }) {
   );
 }
 
-function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails, onOpenAddToHomeScreen, userId }) {
+// Clears a visible error message as soon as the person starts correcting things
+// (typing in, or choosing from, any field), so old red text never lingers.
+function useClearOnEdit(message, clear) {
+  useEffect(() => {
+    if (!message) return undefined;
+    // Runs AFTER the field has handled the edit (bubble phase + next tick). Clearing earlier would
+    // make React redraw the input with its old value and swallow what was just typed.
+    const onEdit = (e) => {
+      const t = e.target;
+      if (t && t.closest && t.closest('[data-keep-error]')) return;
+      setTimeout(() => clear(''), 0);
+    };
+    document.addEventListener('input', onEdit);
+    document.addEventListener('change', onEdit);
+    return () => {
+      document.removeEventListener('input', onEdit);
+      document.removeEventListener('change', onEdit);
+    };
+  }, [message]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+
+// ---------- First-run onboarding (replaces the one-screen welcome) ----------
+function OnboardingScreen({ onFinish }) {
+  const [step, setStep] = useState(0);
+  const [visible, setVisible] = useState(false);
+  const [notif, setNotif] = useState('idle'); // idle | working | on
+  const [notifMsg, setNotifMsg] = useState('');
+  const needsInstall = detectPlatform() === 'ios' && !isRunningStandalone();
+  const total = 4;
+  const last = step === total - 1;
+
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 30);
+    return () => clearTimeout(t);
+  }, []);
+
+  const turnOnNotifications = async () => {
+    setNotifMsg('');
+    setNotif('working');
+    try {
+      await subscribeToPush();
+      await updatePushPreference(true);
+      setNotif('on');
+    } catch (e) {
+      setNotif('idle');
+      setNotifMsg(e.message || "We couldn't turn notifications on");
+    }
+  };
+
+  const slides = [
+    { icon: null, title: 'Welcome to Tranxact 👋', body: 'Your money, in one place. Here is a quick look at what you can do.' },
+    { icon: ArrowDownToLine, title: 'Receive crypto, get naira', body: 'You get your own wallet addresses for BTC, ETH, USDT and more. Whatever lands is turned into naira in your balance.' },
+    { icon: Link2, title: 'Get paid with a link', body: 'Share a payment link or your Tip Me link. Make a one-time link for an invoice, or a recurring one that stays open.' },
+    { icon: ShieldCheck, title: 'Two quick things', body: 'These make your account safer and keep you in the loop.' },
+  ];
+  const s = slides[step];
+
+  return (
+    <div className="min-h-screen bg-black text-white flex flex-col px-6 py-5" data-onboarding={step}>
+      <div className="flex items-center justify-between h-10">
+        <div className="flex gap-1.5" aria-label={`Step ${step + 1} of ${total}`}>
+          {slides.map((_, i) => <span key={i} className={`h-1.5 rounded-full transition-all ${i === step ? 'w-6 bg-white' : 'w-1.5 bg-neutral-700'}`} />)}
+        </div>
+        <button onClick={() => onFinish({})} data-onboarding-skip className="text-sm text-neutral-400 hover:text-white px-2 py-1 transition">Skip</button>
+      </div>
+
+      <div className={`flex-1 flex flex-col items-center justify-center text-center max-w-sm mx-auto w-full transition-all duration-500 ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
+        {s.icon ? (
+          <div className="w-14 h-14 rounded-2xl bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-6"><s.icon className="w-6 h-6 text-white" /></div>
+        ) : <div className="mb-6"><LogoMark size={40} /></div>}
+        <h1 className="text-2xl font-bold mb-3" key={step}>{s.title}</h1>
+        <p className="text-neutral-400 text-sm leading-relaxed mb-8 max-w-xs">{s.body}</p>
+
+        {last && (
+          <div className="w-full space-y-3 text-left">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">Notifications</div>
+                  <p className="text-xs text-neutral-500 mt-0.5">Know the moment money lands.</p>
+                </div>
+                {notif === 'on' ? (
+                  <span className="flex items-center gap-1 text-xs text-emerald-400 flex-shrink-0"><Check className="w-3.5 h-3.5" /> On</span>
+                ) : (
+                  <button onClick={turnOnNotifications} disabled={notif === 'working' || needsInstall} data-onboarding-notify className="bg-white text-black text-xs font-semibold rounded-full px-4 py-2 disabled:opacity-40 flex-shrink-0">
+                    {notif === 'working' ? '…' : 'Turn on'}
+                  </button>
+                )}
+              </div>
+              {needsInstall && <p className="text-xs text-neutral-500 mt-2">On iPhone, add Tranxact to your Home Screen first. We will show you how next.</p>}
+              {notifMsg && <p className="text-xs text-red-400 mt-2">{notifMsg}</p>}
+            </div>
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">Transaction PIN</div>
+                  <p className="text-xs text-neutral-500 mt-0.5">You need it to send money and pay bills.</p>
+                </div>
+                <button onClick={() => onFinish({ openSecurity: true })} data-onboarding-pin className="border border-neutral-700 text-xs font-semibold rounded-full px-4 py-2 flex-shrink-0">Set PIN</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="max-w-sm mx-auto w-full space-y-1 pb-4">
+        {last
+          ? <PrimaryButton onClick={() => onFinish({})}>Go to my wallet</PrimaryButton>
+          : <PrimaryButton onClick={() => setStep(step + 1)}>Next</PrimaryButton>}
+        {step > 0 ? <button onClick={() => setStep(step - 1)} className="w-full text-sm text-neutral-500 hover:text-white py-2 transition">Back</button> : <div className="h-9" />}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Profile: one-tap notifications ----------
+function NotificationsRow({ initialEnabled, onOpenAddToHomeScreen }) {
+  const [enabled, setEnabled] = useState(Boolean(initialEnabled));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { setEnabled(Boolean(initialEnabled)); }, [initialEnabled]);
+
+  const supported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window;
+  const needsInstall = detectPlatform() === 'ios' && !isRunningStandalone();
+  const blocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
+  if (!supported && !needsInstall) return null;
+
+  const turnOn = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      await subscribeToPush();
+      await updatePushPreference(true);
+      setEnabled(true);
+    } catch (e) {
+      setError(e.message || "We couldn't turn notifications on");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const turnOff = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      await unsubscribeFromPush();
+      await updatePushPreference(false);
+      setEnabled(false);
+    } catch (e) {
+      setError(e.message || "We couldn't turn notifications off");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-4" data-notifications-row>
+      {enabled ? (
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-medium"><Check className="w-4 h-4 text-emerald-400" /> Notifications are on</div>
+          <button onClick={turnOff} disabled={busy} className="text-xs text-neutral-500 hover:text-white underline underline-offset-2">Turn off</button>
+        </div>
+      ) : needsInstall ? (
+        <div>
+          <div className="text-sm font-semibold">Turn on notifications</div>
+          <p className="text-xs text-neutral-500 mt-1 mb-3">On iPhone, add Tranxact to your Home Screen first. Then you can turn notifications on here.</p>
+          <button onClick={onOpenAddToHomeScreen} className="bg-white text-black text-sm font-semibold rounded-full px-5 py-2.5">Add to Home Screen</button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">Turn on notifications</div>
+            <p className="text-xs text-neutral-500 mt-0.5">{blocked ? 'Blocked on this phone. Allow notifications for Tranxact in your phone settings, then tap Turn On.' : 'Know the moment money lands, even when the app is closed.'}</p>
+          </div>
+          <button onClick={turnOn} disabled={busy} data-notifications-turn-on className="bg-white text-black text-sm font-semibold rounded-full px-5 py-2.5 disabled:opacity-50 flex-shrink-0">
+            {busy ? '…' : 'Turn On'}
+          </button>
+        </div>
+      )}
+      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+    </div>
+  );
+}
+
+// ---------- Admin: payments waiting, not yet confirmed, and done ----------
+function noticeAgo(iso) {
+  if (!iso) return '';
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} h ${m % 60} min ago`;
+  return `${Math.floor(h / 24)} d ago`;
+}
+
+function PaymentNoticesPanel({ rates, onChanged }) {
+  const [data, setData] = useState(null); // { notices, not_seen, recent }
+  const [loadError, setLoadError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [feedback, setFeedback] = useState(null); // { ok, text }
+  const [confirmId, setConfirmId] = useState(null);
+  const [amount, setAmount] = useState('');
+  const [copied, setCopied] = useState('');
+
+  const load = async () => {
+    try {
+      const res = await adminListPaymentNotices();
+      setData({ notices: res.notices || [], not_seen: res.not_seen || [], recent: res.recent || [] });
+      setLoadError('');
+    } catch (e) {
+      setLoadError(e.message || 'Could not load payments');
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const copy = (text, key) => {
+    navigator.clipboard?.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(''), 1400);
+  };
+
+  const run = async (n, fn, okText) => {
+    setBusyId(n.id);
+    setFeedback(null);
+    try {
+      const res = await fn();
+      setFeedback({ ok: true, text: typeof okText === 'function' ? okText(res) : okText });
+      setConfirmId(null);
+      await load();
+      if (onChanged) onChanged();
+    } catch (e) {
+      setFeedback({ ok: false, text: e.message });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openConfirm = (n) => {
+    if (confirmId === n.id) { setConfirmId(null); return; }
+    setConfirmId(n.id);
+    if (n.method === 'crypto') {
+      const row = (rates || []).find(r => r.coin === n.crypto_asset);
+      setAmount(row && n.claimed_amount ? (Number(n.claimed_amount) / Number(row.effective_rate)).toFixed(2) : '');
+    } else {
+      setAmount(n.claimed_amount ? String(n.claimed_amount) : '');
+    }
+  };
+
+  const settle = (n) => run(n, () => {
+    const payload = n.method === 'crypto'
+      ? { type: 'crypto_deposit', link_slug: n.link_slug, notice_id: n.id, crypto_asset: n.crypto_asset, amount_usd: Number(amount) }
+      : { type: 'fund_bank', link_slug: n.link_slug, notice_id: n.id, amount_ngn: Number(amount) };
+    return adminSettle(payload);
+  }, (r) => `Confirmed. ${fmtNaira(r.net_ngn)} credited to ${r.guest_account ? 'the guest (payout queued)' : '@' + r.target_username}.${r.payer_emailed ? ' Payer emailed.' : ''}${r.link_closed ? ' One-time link closed.' : ''}`);
+
+  // A plain function (not a component) so typing in a card's amount box never rebuilds the card.
+  const renderCard = (n, kind) => {
+    const mismatch = n.link_type === 'fixed' && n.link_amount && n.claimed_amount && Number(n.claimed_amount) !== Number(n.link_amount);
+    const busy = busyId === n.id;
+    return (
+      <div key={n.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-3.5" data-notice={n.id} data-kind={kind}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold truncate">{n.link_title || n.link_slug}</div>
+            <div className="text-xs text-neutral-500 truncate">For {n.owner_label}{n.creator_username ? ` (@${n.creator_username})` : ''}</div>
+          </div>
+          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase ${n.owner_is_guest ? 'bg-violet-500/15 text-violet-300' : 'bg-neutral-800 text-neutral-400'}`}>{n.owner_is_guest ? 'Guest' : 'App user'}</span>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase bg-neutral-800 text-neutral-400">{n.link_mode === 'recurring' ? 'Recurring' : 'One-time'}</span>
+          </div>
+        </div>
+
+        <div className="mt-2.5 space-y-1.5 text-xs">
+          <div className="flex justify-between gap-3"><span className="text-neutral-500">Says they paid</span><span className="font-mono">{n.claimed_amount ? fmtNaira(n.claimed_amount) : '—'} · {n.method}{n.crypto_asset ? ` (${n.crypto_asset})` : ''}</span></div>
+          {mismatch && <div className="text-amber-400">The link price is {fmtNaira(n.link_amount)}, so check the amount.</div>}
+          <div className="flex justify-between gap-3"><span className="text-neutral-500">Payer</span><span className="text-right break-all">{n.customer_name || 'No name'}{n.customer_email ? ` · ${n.customer_email}` : ' · no email'}{n.customer_phone ? ` · ${n.customer_phone}` : ''}</span></div>
+          {n.bank_reference && (
+            <div className="flex justify-between gap-3 items-center"><span className="text-neutral-500">Reference</span>
+              <button onClick={() => copy(n.bank_reference, `ref-${n.id}`)} className="font-mono text-violet-300 flex items-center gap-1.5">{n.bank_reference} <span className="text-neutral-500 font-sans">{copied === `ref-${n.id}` ? 'Copied' : 'Copy'}</span></button>
+            </div>
+          )}
+          <div className="flex justify-between gap-3"><span className="text-neutral-500">Notice</span><span className="font-mono">{n.notice_ref}</span></div>
+          {kind === 'done' ? (
+            <div className="flex justify-between gap-3"><span className="text-neutral-500">Confirmed</span><span>{n.settled_at ? new Date(n.settled_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Earlier'}{n.payer_confirmed_email_at ? ' · payer emailed ✓' : ''}</span></div>
+          ) : (
+            <div className="flex justify-between gap-3"><span className="text-neutral-500">Noticed</span><span className={n.minutes_waiting >= 120 ? 'text-amber-400' : ''}>{noticeAgo(n.created_at)}{n.minutes_waiting >= 120 ? ' · over 2 hours' : ''}</span></div>
+          )}
+          {kind === 'not_seen' && (
+            <div className="text-neutral-500">
+              Marked not seen {noticeAgo(n.not_seen_at)}
+              {n.nudge_count > 0 ? ` · nudged ${n.nudge_count}× (${n.last_nudge_kind === 'proof' ? 'asked for proof' : "hasn't paid"}) ${noticeAgo(n.last_nudged_at)}` : ' · not nudged yet'}
+            </div>
+          )}
+        </div>
+
+        {kind !== 'done' && confirmId === n.id && (
+          <div className="mt-3 pt-3 border-t border-neutral-800 space-y-2" data-confirm-form>
+            <label className="text-xs text-neutral-400 block">{n.method === 'crypto' ? `Amount received (USD, ${n.crypto_asset})` : 'Amount received (NGN)'}</label>
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm font-mono outline-none" />
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setConfirmId(null)} className="border border-neutral-800 rounded-xl py-2.5 text-sm">Cancel</button>
+              <button onClick={() => settle(n)} disabled={busy || !(Number(amount) > 0)} data-confirm-go className="bg-emerald-500 text-black font-semibold rounded-xl py-2.5 text-sm disabled:opacity-50">{busy ? '…' : 'Confirm & credit'}</button>
+            </div>
+          </div>
+        )}
+
+        {kind === 'waiting' && confirmId !== n.id && (
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <button onClick={() => openConfirm(n)} disabled={busy} data-act="confirm" className="bg-emerald-500 text-black font-semibold rounded-xl py-2.5 text-sm disabled:opacity-50">Confirmed</button>
+            <button onClick={() => run(n, () => adminNoticeAction({ action: 'mark_not_seen', notice_id: n.id }), 'Moved to “Not yet confirmed”.')} disabled={busy} data-act="not_seen" className="border border-neutral-700 rounded-xl py-2.5 text-sm disabled:opacity-50">Not seen yet</button>
+          </div>
+        )}
+
+        {kind === 'not_seen' && confirmId !== n.id && (
+          <div className="mt-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => run(n, () => adminNoticeAction({ action: 'nudge', kind: 'not_paid', notice_id: n.id }), 'Nudge sent: “we haven’t received your payment”.')} disabled={busy || !n.customer_email} data-act="nudge_not_paid" className="border border-neutral-700 rounded-xl py-2.5 text-xs disabled:opacity-40">Nudge: hasn’t paid</button>
+              <button onClick={() => run(n, () => adminNoticeAction({ action: 'nudge', kind: 'proof', notice_id: n.id }), 'Asked the payer for proof of payment.')} disabled={busy || !n.customer_email} data-act="nudge_proof" className="border border-neutral-700 rounded-xl py-2.5 text-xs disabled:opacity-40">Ask for proof</button>
+            </div>
+            {!n.customer_email && <p className="text-[11px] text-neutral-600">This payer didn’t leave an email, so they can’t be nudged.</p>}
+            <div className="grid grid-cols-3 gap-2">
+              <button onClick={() => openConfirm(n)} disabled={busy} data-act="confirm" className="bg-emerald-500 text-black font-semibold rounded-xl py-2.5 text-xs disabled:opacity-50">Confirmed</button>
+              <button onClick={() => run(n, () => adminNoticeAction({ action: 'reopen', notice_id: n.id }), 'Back in “Waiting”.')} disabled={busy} data-act="reopen" className="border border-neutral-800 rounded-xl py-2.5 text-xs disabled:opacity-50">Back to waiting</button>
+              <button onClick={() => { if (window.confirm('Close this payment and let the payer know?')) run(n, () => adminNoticeAction({ action: 'cancel', notice_id: n.id, notify: true }), (r) => `Closed.${r.emailed ? ' Payer emailed.' : ''}`); }} disabled={busy} data-act="cancel" className="border border-red-500/40 text-red-400 rounded-xl py-2.5 text-xs disabled:opacity-50">Close</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const waiting = data?.notices || [];
+  const notSeen = data?.not_seen || [];
+  const recent = data?.recent || [];
+
+  return (
+    <div className="mb-4 space-y-5" data-notices-panel>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-neutral-500">Check each payment against your account, then confirm it or mark it not seen.</p>
+        <button onClick={load} className="text-xs text-neutral-400 hover:text-white flex-shrink-0 ml-3">Reload</button>
+      </div>
+      {feedback && <p className={`text-sm ${feedback.ok ? 'text-emerald-400' : 'text-red-400'}`} data-feedback>{feedback.text}</p>}
+      {loadError && <p className="text-sm text-red-400">{loadError}</p>}
+      {data === null && !loadError && <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-neutral-500" /></div>}
+
+      {data && (
+        <>
+          <div>
+            <h4 className="text-xs font-semibold text-neutral-300 mb-2">Waiting for confirmation ({waiting.length})</h4>
+            {waiting.length === 0 ? <p className="text-xs text-neutral-600">Nothing waiting.</p> : <div className="space-y-2">{waiting.map(n => renderCard(n, 'waiting'))}</div>}
+          </div>
+          <div>
+            <h4 className="text-xs font-semibold text-neutral-300 mb-2">Not yet confirmed ({notSeen.length})</h4>
+            {notSeen.length === 0 ? <p className="text-xs text-neutral-600">Nothing here. Payments you mark “not seen” land here so you can nudge or close them.</p> : <div className="space-y-2">{notSeen.map(n => renderCard(n, 'not_seen'))}</div>}
+          </div>
+          <div>
+            <h4 className="text-xs font-semibold text-neutral-300 mb-2">Done recently ({recent.length})</h4>
+            {recent.length === 0 ? <p className="text-xs text-neutral-600">No confirmed payments yet.</p> : <div className="space-y-2">{recent.slice(0, 8).map(n => renderCard(n, 'done'))}</div>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails, onOpenAddToHomeScreen, userId, pushEnabled }) {
   const [showVerification, setShowVerification] = useState(false);
   const items = [
     { label: 'Account details', icon: UserCircle, onClick: onOpenAccountDetails },
@@ -5971,6 +6328,7 @@ function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, o
   return (
     <div>
       <h1 className="text-xl font-bold mb-6">Profile</h1>
+      <NotificationsRow initialEnabled={pushEnabled} onOpenAddToHomeScreen={onOpenAddToHomeScreen} />
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900 mb-4">
         {items.map(it => (
           <button key={it.label} onClick={it.onClick} className="w-full flex items-center justify-between px-4 py-4 hover:bg-neutral-900 transition">
@@ -6000,6 +6358,7 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId, onWithdrawn }
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawn, setWithdrawn] = useState(false);
   const [error, setError] = useState('');
+  useClearOnEdit(error, setError);
 
   const loadBreakdown = () => {
     getReferralEarnings(userId).then(({ data }) => {
@@ -6311,7 +6670,7 @@ function MobileAppRoot() {
   const hasSeenWelcome = (session) =>
     localStorage.getItem('hasSeenWelcome') === 'true' || session?.user?.user_metadata?.hasSeenWelcome === true;
 
-  const handleWelcomeContinue = async () => {
+  const handleWelcomeContinue = async (opts) => {
     localStorage.setItem('hasSeenWelcome', 'true');
     try { await supabase.auth.updateUser({ data: { hasSeenWelcome: true } }); } catch { /* best-effort */ }
     // Real first entry — a confirmed session finally exists at this point,
@@ -6322,6 +6681,7 @@ function MobileAppRoot() {
     // automatically — no separate dismissal flag needed. Skipped entirely
     // if they're somehow already running as an installed PWA at this point.
     if (!isRunningStandalone()) setShowAddToHomeScreen(true);
+    if (opts && opts.openSecurity) { setTab('profile'); setProfileView('security'); }
     setScreen('app');
   };
 
@@ -6385,7 +6745,7 @@ function MobileAppRoot() {
   if (screen === 'signup') return <SignupScreen onSignup={() => {}} onExistingAccount={(em) => { setResetEmail(em); setScreen('forgot'); }} goLogin={() => setScreen('login')} initialReferralCode={referralFromUrl} />;
   if (screen === 'forgot') return <ForgotScreen key={resetEmail || 'blank'} prefillEmail={resetEmail || undefined} onDone={() => { setResetEmail(''); return finishPasswordReset(); }} goLogin={() => { setResetEmail(''); setScreen('login'); }} />;
   if (screen === 'forgotSent') return <ForgotSentScreen goLogin={() => setScreen('login')} />;
-  if (screen === 'welcome') return <WelcomeScreen onContinue={handleWelcomeContinue} />;
+  if (screen === 'welcome') return <OnboardingScreen onFinish={handleWelcomeContinue} />;
 
   const displayName = profile?.full_name?.split(' ')[0] || profile?.username || '';
   const balance = wallet ? Number(wallet.balance) : 0;
@@ -6512,6 +6872,7 @@ function MobileAppRoot() {
           onOpenAccountDetails={() => setProfileView('account')}
           onOpenAddToHomeScreen={() => setShowAddToHomeScreen(true)}
           userId={profile?.id}
+          pushEnabled={profile?.push_notifications_enabled}
         />
       )}
       {tab === 'profile' && profileView === 'rates' && (
