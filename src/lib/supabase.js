@@ -390,6 +390,8 @@ export async function getReferralEarnings(userId) {
     .from('referral_earnings')
     .select('amount, status, type, created_at')
     .eq('referrer_id', userId)
+    // A referral row paid to yourself is the old first-deposit bonus; it is your own money, not a referral earning.
+    .or(`referred_user_id.neq.${userId},type.neq.referral`)
     .order('created_at', { ascending: false });
   return { data, error };
 }
