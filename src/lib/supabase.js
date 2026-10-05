@@ -514,7 +514,7 @@ export async function updatePushPreference(enabled) {
   return true;
 }
 
-export async function createPaymentLink({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type, inventory }) {
+export async function createPaymentLink({ title, description, link_type, link_mode, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type, inventory }) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
 
@@ -524,7 +524,7 @@ export async function createPaymentLink({ title, description, link_type, amount,
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ title, description, link_type, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type, inventory }),
+    body: JSON.stringify({ title, description, link_type, link_mode, amount, is_tip, service_type, expected_people, expiry_date, business_id, image_url, product_type, inventory }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to create payment link');
@@ -750,7 +750,7 @@ export async function getMyPaymentLinks() {
   if (!user) throw new Error('Not signed in');
   const { data, error } = await supabase
     .from('payment_links')
-    .select('id, slug, title, description, link_type, amount, is_tip, status, created_at')
+    .select('id, slug, title, description, link_type, link_mode, amount, is_tip, status, paused_by_limit, created_at')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
@@ -902,6 +902,18 @@ export async function setItemFulfillment(linkSlug, fulfillmentType, instructions
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to update fulfillment');
   return data;
+}
+
+// Owner switches a recurring link on or off. Returns 'active' or 'paused'.
+export async function setPaymentLinkActive(linkId, active) {
+  const { data, error } = await supabase.rpc('set_payment_link_active', { p_link_id: linkId, p_active: active });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// Admin actions on one payment notice: mark_not_seen, nudge, cancel, reopen.
+export async function adminNoticeAction(payload) {
+  return callAdminFunction('admin-payment-notices', payload);
 }
 
 export async function adminListPaymentNotices() {
