@@ -3116,9 +3116,9 @@ function TranxactPayScreen({ onClose, username }) {
                 {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Link'}
               </PrimaryButton>
               {modePicker && createPortal(
-                <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} data-mode-picker role="dialog" aria-modal="true" aria-label="How often can it be paid?">
+                <div className="text-white" style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', color: '#fff' }} data-mode-picker role="dialog" aria-modal="true" aria-label="How often can it be paid?">
                   <div className="backdrop-blur-sm" style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.7)' }} data-mode-backdrop onClick={() => { if (!creating) setModePicker(false); }} />
-                  <div className="bg-neutral-950 border border-neutral-800 p-6" style={{ position: 'relative', width: '100%', maxWidth: 480, borderRadius: '24px 24px 0 0', paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
+                  <div className="bg-neutral-950 border border-neutral-800 p-6 text-white" style={{ position: 'relative', width: '100%', maxWidth: 480, borderRadius: '24px 24px 0 0', color: '#fff', paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
                     <h3 className="text-lg font-bold mb-1">How often can it be paid?</h3>
                     <p className="text-sm text-neutral-500 mb-5 truncate">{newTitle.trim()}{newType === 'fixed' && Number(newAmount) > 0 ? ` · ${fmtNaira(Number(newAmount))}` : ' · Flexible amount'}</p>
                     <button onClick={() => createWithMode('one_time')} disabled={creating} data-mode="one_time" className="w-full text-left bg-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl p-4 mb-3 transition disabled:opacity-60">
