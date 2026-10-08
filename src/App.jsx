@@ -5,7 +5,7 @@ import {
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
   UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar, Search,
-  RefreshCw,
+  RefreshCw, Receipt, PiggyBank,
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -73,7 +73,17 @@ const BILLS = [
   { id: 'data', label: 'Data', icon: Wifi, ready: true },
   { id: 'electricity', label: 'Electricity', icon: Zap, ready: true },
   { id: 'tv', label: 'TV', icon: Tv, ready: true },
+  { id: 'earn', label: 'Earn', icon: Sparkles, ready: true },
   { id: 'betting', label: 'Betting', icon: Trophy, ready: false },
+  { id: 'savings', label: 'Savings', icon: PiggyBank, ready: false },
+];
+
+// The four shortcuts shown on Home. Bills opens a small picker (Electricity, TV).
+const HOME_SERVICES = [
+  { id: 'airtime', label: 'Airtime', icon: Smartphone },
+  { id: 'data', label: 'Data', icon: Wifi },
+  { id: 'bills', label: 'Bills', icon: Receipt },
+  { id: 'earn', label: 'Earn', icon: Sparkles },
 ];
 
 // Maps a real transactions-table row to what TransactionRow expects to render
@@ -139,7 +149,6 @@ function mapTransaction(row) {
 
 const NAV = [
   { key: 'home', label: 'Home', icon: Home },
-  { key: 'earn', label: 'Earn', icon: Sparkles },
   { key: 'crypto', label: 'Crypto', icon: Bitcoin },
   { key: 'cards', label: 'Cards', icon: CreditCard },
   { key: 'profile', label: 'Profile', icon: User },
@@ -944,31 +953,17 @@ function ForgotSentScreen({ goLogin }) {
 }
 
 // ---------- Balance card ----------
-function BalanceCard({ visible, onToggle, onFund, balance = 0 }) {
+function BalanceCard({ visible, onToggle, balance = 0 }) {
   return (
-    <div className="relative bg-neutral-950 border border-neutral-800 rounded-3xl p-6 overflow-hidden">
-      <div className="relative z-10">
-        <div className="flex items-center gap-2 text-neutral-400 text-sm mb-3">
-          <span>Total Balance</span>
-          <button onClick={onToggle} className="hover:text-white transition" aria-label="Toggle balance visibility">
-            {visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-          </button>
-        </div>
-        <div className="font-mono text-3xl sm:text-4xl font-semibold tracking-tight mb-5">
-          {visible ? fmtNaira(balance) : '₦ • • • • • •'}
-        </div>
-        <button onClick={onFund} className="bg-white text-black font-semibold rounded-xl px-5 py-2.5 text-sm flex items-center gap-2 hover:bg-neutral-200 transition active:scale-[0.98]">
-          Fund Wallet <Plus className="w-4 h-4" />
+    <div className="bg-neutral-950 border border-neutral-800 rounded-3xl px-6 py-9 text-center">
+      <div className="flex items-center justify-center gap-2 text-neutral-400 text-sm mb-3">
+        <span>Total Balance</span>
+        <button onClick={onToggle} className="hover:text-white transition" aria-label="Toggle balance visibility">
+          {visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
         </button>
       </div>
-      <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-90 hidden sm:block">
-        <div className="relative w-24 h-20">
-          <div className="absolute inset-0 bg-neutral-800 border border-neutral-700 rounded-2xl rotate-6" />
-          <div className="absolute inset-0 bg-neutral-900 border border-neutral-700 rounded-2xl -rotate-3 translate-x-2" />
-          <div className="absolute inset-0 bg-gradient-to-br from-violet-600 to-violet-900 border border-violet-700 rounded-2xl flex items-center justify-center translate-x-4 -translate-y-1">
-            <Wallet className="w-7 h-7 text-white/90" />
-          </div>
-        </div>
+      <div className="font-mono text-3xl sm:text-4xl font-semibold tracking-tight">
+        {visible ? fmtNaira(balance) : '₦ • • • • • •'}
       </div>
     </div>
   );
@@ -999,7 +994,7 @@ function ServiceTile({ label, icon: Icon, onClick, ready = true }) {
         <Icon className="w-4 h-4" />
       </div>
       <span className="text-xs text-neutral-400">{label}</span>
-      {!ready && <span className="text-[9px] text-neutral-600">Soon</span>}
+      {!ready && <span className="text-[9px] text-neutral-500">Coming soon</span>}
     </button>
   );
 }
@@ -1317,7 +1312,7 @@ function TransactionRow({ tx, onSendAgain }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, onSendAgain, onTranxactPay, onAirtime, onData, onElectricity, onTV, onSeeAllBills, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
+function HomeScreen({ balanceVisible, toggleBalance, onReceive, onSend, onSendAgain, onTranxactPay, onAirtime, onData, onBills, onEarn, onSeeAllBills, onSeeAll, onOpenNotifications, unreadCount = 0, displayName = '', balance = 0, transactions = [] }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -1335,27 +1330,26 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
         </button>
       </div>
 
-      <BalanceCard visible={balanceVisible} onToggle={toggleBalance} onFund={onFund} balance={balance} />
+      <BalanceCard visible={balanceVisible} onToggle={toggleBalance} balance={balance} />
 
       <div className="grid grid-cols-3 gap-3">
         <ActionButton label="Receive" sub="Crypto only" icon={ArrowDownToLine} onClick={onReceive} />
         <ActionButton label="Send" sub="To user or bank" icon={ArrowUpFromLine} onClick={onSend} />
-        <ActionButton label="TranxactPay" sub="Payment link" icon={Link2} onClick={onTranxactPay} />
+        <ActionButton label="Get Paid" sub="Payment link" icon={Link2} onClick={onTranxactPay} />
       </div>
 
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Pay Bills &amp; Services</h2>
+          <h2 className="text-sm font-semibold">Services</h2>
           <button onClick={onSeeAllBills} className="text-xs text-neutral-500 hover:text-white transition">See all</button>
         </div>
         <div className="grid grid-cols-4 gap-2">
-          {BILLS.slice(0, 4).map(b => (
+          {HOME_SERVICES.map(s => (
             <ServiceTile
-              key={b.label}
-              label={b.label}
-              icon={b.icon}
-              ready={b.ready}
-              onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : b.id === 'electricity' ? onElectricity : b.id === 'tv' ? onTV : undefined}
+              key={s.id}
+              label={s.label}
+              icon={s.icon}
+              onClick={s.id === 'airtime' ? onAirtime : s.id === 'data' ? onData : s.id === 'bills' ? onBills : onEarn}
             />
           ))}
         </div>
@@ -1371,7 +1365,7 @@ function HomeScreen({ balanceVisible, toggleBalance, onFund, onReceive, onSend, 
         {transactions.length === 0 ? (
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl py-8 text-center">
             <p className="text-sm text-neutral-500">No transactions yet</p>
-            <p className="text-xs text-neutral-600 mt-1">Fund your wallet or receive crypto to get started</p>
+            <p className="text-xs text-neutral-600 mt-1">Receive crypto to get started</p>
           </div>
         ) : (
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
@@ -1742,20 +1736,33 @@ const QUICK_AMOUNTS = [100, 200, 500, 1000, 2000];
 
 // The full bills list — the home screen only teases the first 4, this
 // shows every real and upcoming service in one place.
-function AllBillsScreen({ onBack, onAirtime, onData, onElectricity, onTV }) {
+function AllBillsScreen({ onBack, onAirtime, onData, onElectricity, onTV, onEarn }) {
+  const handlers = { airtime: onAirtime, data: onData, electricity: onElectricity, tv: onTV, earn: onEarn };
   return (
     <div>
-      <BackHeader title="Bills & Services" onBack={onBack} />
-      <div className="grid grid-cols-4 gap-2">
+      <BackHeader title="Services" onBack={onBack} />
+      <div className="grid grid-cols-2 gap-3">
         {BILLS.map(b => (
           <ServiceTile
-            key={b.label}
+            key={b.id}
             label={b.label}
             icon={b.icon}
             ready={b.ready}
-            onClick={b.id === 'airtime' ? onAirtime : b.id === 'data' ? onData : b.id === 'electricity' ? onElectricity : b.id === 'tv' ? onTV : undefined}
+            onClick={handlers[b.id]}
           />
         ))}
+      </div>
+    </div>
+  );
+}
+
+function BillsMenuScreen({ onBack, onElectricity, onTV }) {
+  return (
+    <div>
+      <BackHeader title="Bills" onBack={onBack} />
+      <div className="grid grid-cols-2 gap-3">
+        <ServiceTile label="Electricity" icon={Zap} onClick={onElectricity} />
+        <ServiceTile label="TV" icon={Tv} onClick={onTV} />
       </div>
     </div>
   );
@@ -5935,7 +5942,7 @@ function VerificationModal({ onClose, userId }) {
 
 function SupportScreen({ onBack }) {
   const faqs = [
-    { q: 'How do I fund my wallet?', a: 'Tap Fund Wallet on Home and send any supported crypto. It converts to naira automatically once confirmed.' },
+    { q: 'How do I fund my wallet?', a: 'Tap Receive on Home and send any supported crypto. It converts to naira automatically once confirmed.' },
     { q: 'Which crypto coins are supported?', a: 'ETH, BTC, BNB (BEP-20), USDT (TRC20), USDC (ERC-20), TRX, and SOL. Received crypto converts to naira automatically.' },
     { q: 'How long does a deposit take to reflect?', a: 'Usually a few minutes after the transfer or deposit is confirmed.' },
     { q: 'Is sending to a Tranxact user free?', a: 'Yes, transfers between Tranxact users have no fee.' },
@@ -6916,20 +6923,19 @@ function MobileAppRoot() {
   const balance = wallet ? Number(wallet.balance) : 0;
 
   return (
-    <AppShell tab={tab} setTab={(t) => { setTab(t); setHomeView('main'); setProfileView('main'); }} isAdmin={profile?.is_admin === true}>
+    <AppShell tab={tab === 'earn' ? 'home' : tab} setTab={(t) => { setTab(t); setHomeView('main'); setProfileView('main'); setEarnView('main'); }} isAdmin={profile?.is_admin === true}>
       {tab === 'home' && homeView === 'main' && (
         <HomeScreen
           balanceVisible={balanceVisible}
           toggleBalance={() => setBalanceVisible(v => !v)}
-          onFund={() => setHomeView('fund')}
           onReceive={() => setHomeView('receive')}
           onSend={() => setHomeView('send')}
           onSendAgain={(username) => { setSendAgainUsername(username); setHomeView('send'); }}
           onTranxactPay={() => setTpOpen(true)}
           onAirtime={() => setHomeView('airtime')}
           onData={() => setHomeView('data')}
-          onElectricity={() => setHomeView('electricity')}
-          onTV={() => setHomeView('tv')}
+          onBills={() => setHomeView('billsMenu')}
+          onEarn={() => setTab('earn')}
           onSeeAllBills={() => setHomeView('allBills')}
           onSeeAll={() => setHomeView('history')}
           onOpenNotifications={() => setHomeView('notifications')}
@@ -6960,6 +6966,14 @@ function MobileAppRoot() {
           onBack={() => setHomeView('main')}
           onAirtime={() => setHomeView('airtime')}
           onData={() => setHomeView('data')}
+          onElectricity={() => setHomeView('electricity')}
+          onTV={() => setHomeView('tv')}
+          onEarn={() => { setHomeView('main'); setTab('earn'); }}
+        />
+      )}
+      {tab === 'home' && homeView === 'billsMenu' && (
+        <BillsMenuScreen
+          onBack={() => setHomeView('main')}
           onElectricity={() => setHomeView('electricity')}
           onTV={() => setHomeView('tv')}
         />
@@ -7004,6 +7018,7 @@ function MobileAppRoot() {
         />
       )}
 
+      {tab === 'earn' && earnView === 'main' && <BackHeader title="" onBack={() => setTab('home')} />}
       {tab === 'earn' && earnView === 'main' && (
         <EarnScreen
           onEarnings={() => setEarnView('earnings')}
