@@ -439,7 +439,7 @@ function Field({ label, icon: Icon, ...props }) {
   return (
     <label className="block">
       <span className="text-sm text-neutral-400 mb-2 block">{label}</span>
-      <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-neutral-600 transition">
+      <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-[#8B5CF6] transition">
         {Icon && <Icon className="w-4 h-4 text-neutral-500 flex-shrink-0" />}
         <input
           {...props}
@@ -466,14 +466,14 @@ function BackHeader({ title, onBack, right = null }) {
   );
 }
 
-function TabToggle({ options, value, onChange, accent = false }) {
+function TabToggle({ options, value, onChange }) {
   return (
     <div className="grid gap-2 mb-5" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map(opt => (
         <button
           key={opt.value}
           onClick={() => onChange(opt.value)}
-          className={`rounded-xl py-2.5 text-sm font-medium border transition flex items-center justify-center gap-1.5 ${value === opt.value ? (accent ? 'bg-[#8B5CF6] text-white border-[#8B5CF6]' : 'bg-white text-black border-white') : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-600'}`}
+          className={`rounded-xl py-2.5 text-sm font-medium border transition flex items-center justify-center gap-1.5 ${value === opt.value ? 'bg-[#8B5CF6] text-white border-[#8B5CF6]' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-600'}`}
         >
           {opt.icon && <opt.icon className="w-3.5 h-3.5" />}
           {opt.label}
@@ -606,7 +606,7 @@ function LoginScreen({ onLogin, goSignup, goForgot, isDashboard }) {
         <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" required value={email} onChange={e => setEmail(e.target.value)} />
         <label className="block">
           <span className="text-sm text-neutral-400 mb-2 block">Password</span>
-          <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-neutral-600 transition">
+          <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-[#8B5CF6] transition">
             <Lock className="w-4 h-4 text-neutral-500 flex-shrink-0" />
             <input
               type={showPw ? 'text' : 'password'}
@@ -656,7 +656,7 @@ function AuthCodeInput({ value, onChange, onComplete, disabled }) {
         autoFocus
         disabled={disabled}
         aria-label="Code from your email"
-        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3.5 text-center font-mono text-2xl tracking-[0.35em] text-white placeholder-neutral-700 outline-none focus:border-neutral-600 transition disabled:opacity-50"
+        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3.5 text-center font-mono text-2xl tracking-[0.35em] text-white placeholder-neutral-700 outline-none focus:border-[#8B5CF6] transition disabled:opacity-50"
       />
     </label>
   );
@@ -763,7 +763,7 @@ function SignupScreen({ onSignup, onExistingAccount, goLogin, initialReferralCod
         <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" required value={email} onChange={e => setEmail(e.target.value)} />
         <label className="block">
           <span className="text-sm text-neutral-400 mb-2 block">Password</span>
-          <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-neutral-600 transition">
+          <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-[#8B5CF6] transition">
             <Lock className="w-4 h-4 text-neutral-500 flex-shrink-0" />
             <input
               type={showPw ? 'text' : 'password'}
@@ -898,7 +898,7 @@ function ForgotScreen({ onDone, goLogin, isDashboard, prefillEmail }) {
         )}
         <label className="block">
           <span className="text-sm text-neutral-400 mb-2 block">New password</span>
-          <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-neutral-600 transition">
+          <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-[#8B5CF6] transition">
             <Lock className="w-4 h-4 text-neutral-500 flex-shrink-0" />
             <input
               type={showPw ? 'text' : 'password'}
@@ -3106,7 +3106,6 @@ function TranxactPayScreen({ onClose, username }) {
         <BackHeader title="Get Paid" onBack={goBack} />
 
         <TabToggle
-          accent
           value={tab}
           onChange={setTab}
           options={[

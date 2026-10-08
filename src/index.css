@@ -5,3 +5,23 @@
 html, body, #root {
   height: 100%;
 }
+
+/* ---- Tap feedback (brand purple #8B5CF6) -------------------------------- */
+/* The animated tap flash lives in src/lib/tapEffect.js. Here: hide the browser's
+   default grey tap flash so it doesn't compete, give keyboard users a thin
+   purple focus ring, and give reduced-motion users a static (non-animated)
+   pressed ring. */
+button, [role="button"], a[href], summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible, [role="button"]:focus-visible, a[href]:focus-visible, summary:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.6);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active, [role="button"]:active, a[href]:active, summary:active {
+    box-shadow: inset 0 0 0 1.5px rgba(139, 92, 246, 0.55);
+  }
+}
