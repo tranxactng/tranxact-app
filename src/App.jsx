@@ -466,14 +466,14 @@ function BackHeader({ title, onBack, right = null }) {
   );
 }
 
-function TabToggle({ options, value, onChange }) {
+function TabToggle({ options, value, onChange, accent = false }) {
   return (
     <div className="grid gap-2 mb-5" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map(opt => (
         <button
           key={opt.value}
           onClick={() => onChange(opt.value)}
-          className={`rounded-xl py-2.5 text-sm font-medium border transition flex items-center justify-center gap-1.5 ${value === opt.value ? 'bg-white text-black border-white' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-600'}`}
+          className={`rounded-xl py-2.5 text-sm font-medium border transition flex items-center justify-center gap-1.5 ${value === opt.value ? (accent ? 'bg-[#8B5CF6] text-white border-[#8B5CF6]' : 'bg-white text-black border-white') : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-600'}`}
         >
           {opt.icon && <opt.icon className="w-3.5 h-3.5" />}
           {opt.label}
@@ -969,14 +969,14 @@ function BalanceCard({ visible, onToggle, balance = 0 }) {
   );
 }
 
-function ActionButton({ label, sub, icon: Icon, onClick }) {
+function ActionButton({ label, sub, icon: Icon, onClick, accent = false }) {
   return (
     <button
       onClick={onClick}
       className="bg-neutral-950 border border-neutral-800 rounded-2xl py-5 flex flex-col items-center gap-2 hover:bg-neutral-900 hover:border-neutral-700 transition active:scale-[0.98]"
     >
-      <div className="w-10 h-10 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-        <Icon className="w-4 h-4" />
+      <div className={`w-10 h-10 rounded-full border flex items-center justify-center ${accent ? 'bg-[#8B5CF6] border-[#8B5CF6]' : 'bg-neutral-900 border-neutral-800'}`}>
+        <Icon className={`w-4 h-4 ${accent ? 'text-white' : ''}`} />
       </div>
       <div className="text-sm font-semibold">{label}</div>
       <div className="text-xs text-neutral-500">{sub}</div>
@@ -1335,7 +1335,7 @@ function HomeScreen({ balanceVisible, toggleBalance, onReceive, onSend, onSendAg
       <div className="grid grid-cols-3 gap-3">
         <ActionButton label="Receive" sub="Crypto only" icon={ArrowDownToLine} onClick={onReceive} />
         <ActionButton label="Send" sub="To user or bank" icon={ArrowUpFromLine} onClick={onSend} />
-        <ActionButton label="Get Paid" sub="Payment link" icon={Link2} onClick={onTranxactPay} />
+        <ActionButton label="Get Paid" sub="Accept payments" icon={Link2} onClick={onTranxactPay} accent />
       </div>
 
       <div>
@@ -2902,6 +2902,19 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
 function TranxactPayScreen({ onClose, username }) {
   const [tab, setTab] = useState('getpaid'); // getpaid | tip | payments
 
+  // This is a page now, so the browser/system back button should leave it the
+  // same way the on-screen arrow does. One history entry is added on open.
+  useEffect(() => {
+    if (!window.history.state?.tranxactPay) window.history.pushState({ tranxactPay: true }, '');
+    const onPop = () => onClose();
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const goBack = () => {
+    if (window.history.state?.tranxactPay) window.history.back(); // popstate -> onClose
+    else onClose();
+  };
+
   const [links, setLinks] = useState(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -3089,21 +3102,15 @@ function TranxactPayScreen({ onClose, username }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full sm:max-w-md bg-neutral-950 border border-neutral-800 rounded-t-3xl sm:rounded-3xl p-6 max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold">TranxactPay</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center hover:bg-neutral-800 transition">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <div>
+        <BackHeader title="Get Paid" onBack={goBack} />
 
         <TabToggle
+          accent
           value={tab}
           onChange={setTab}
           options={[
-            { value: 'getpaid', label: 'Get Paid' },
+            { value: 'getpaid', label: 'Payment Link' },
             { value: 'tip', label: 'Tip Me' },
             { value: 'payments', label: 'Payments' },
           ]}
@@ -3227,7 +3234,6 @@ function TranxactPayScreen({ onClose, username }) {
             )}
           </div>
         )}
-      </div>
     </div>
   );
 }
@@ -6785,9 +6791,9 @@ function AppShell({ tab, setTab, isAdmin = false, children }) {
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur-md border-t border-neutral-900 flex justify-around py-2.5 z-40" style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}>
         {navItems.map(n => (
           <button key={n.key} onClick={() => setTab(n.key)} className="flex flex-col items-center gap-1 px-3 py-1">
-            <n.icon className={`w-5 h-5 ${tab === n.key ? 'text-white' : 'text-neutral-600'}`} />
+            <n.icon className={`w-5 h-5 ${tab === n.key ? 'text-[#8B5CF6]' : 'text-neutral-600'}`} />
             <span className={`text-[10px] ${tab === n.key ? 'text-white' : 'text-neutral-600'}`}>{n.label}</span>
-            {tab === n.key && <span className="w-1 h-1 rounded-full bg-white mt-0.5" />}
+            {tab === n.key && <span className="w-1 h-1 rounded-full bg-[#8B5CF6] mt-0.5" />}
           </button>
         ))}
       </nav>
@@ -6809,7 +6815,6 @@ function MobileAppRoot() {
   const [profileView, setProfileView] = useState('main'); // main | rates | support | username | security | settings | account
   const [earnView, setEarnView] = useState('main'); // main | earnings | leaderboard
   const [balanceVisible, setBalanceVisible] = useState(true);
-  const [tpOpen, setTpOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [wallet, setWallet] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -6931,7 +6936,7 @@ function MobileAppRoot() {
           onReceive={() => setHomeView('receive')}
           onSend={() => setHomeView('send')}
           onSendAgain={(username) => { setSendAgainUsername(username); setHomeView('send'); }}
-          onTranxactPay={() => setTpOpen(true)}
+          onTranxactPay={() => setHomeView('getpaid')}
           onAirtime={() => setHomeView('airtime')}
           onData={() => setHomeView('data')}
           onBills={() => setHomeView('billsMenu')}
@@ -7077,7 +7082,7 @@ function MobileAppRoot() {
         />
       )}
 
-      {tpOpen && <TranxactPayScreen onClose={() => setTpOpen(false)} username={profile?.username || ''} />}
+      {tab === 'home' && homeView === 'getpaid' && <TranxactPayScreen onClose={() => setHomeView('main')} username={profile?.username || ''} />}
       {showAddToHomeScreen && <AddToHomeScreenModal onClose={() => setShowAddToHomeScreen(false)} />}
     </AppShell>
   );
