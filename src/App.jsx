@@ -14,7 +14,7 @@ import {
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminSweepBtc, adminCheckSolBalance,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
-  changeUsername, updatePassword, setTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
+  changeUsername, updatePassword, setTransactionPin, changeTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent, sendWelcomeEmail,
@@ -5016,7 +5016,7 @@ function UsernameScreen({ onBack, currentUsername, onChanged }) {
   );
 }
 
-function SecurityScreen({ onBack, onPinSet }) {
+function SecurityScreen({ onBack, onPinSet, hasPin }) {
   const [newPassword, setNewPassword] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState('');
@@ -5024,6 +5024,7 @@ function SecurityScreen({ onBack, onPinSet }) {
   const [pwSuccess, setPwSuccess] = useState(false);
 
   const [pin, setPin] = useState('');
+  const [oldPin, setOldPin] = useState('');
   const [pinLoading, setPinLoading] = useState(false);
   const [pinError, setPinError] = useState('');
   useClearOnEdit(pinError, setPinError);
@@ -5051,10 +5052,19 @@ function SecurityScreen({ onBack, onPinSet }) {
     setPinSuccess(false);
     setPinLoading(true);
     try {
-      await setTransactionPin(pin);
+      if (hasPin) {
+        const ok = await changeTransactionPin(oldPin, pin);
+        if (!ok) {
+          setPinError('Current PIN is incorrect, or too many attempts. Try again in 15 minutes.');
+          return;
+        }
+      } else {
+        await setTransactionPin(pin);
+      }
       setPinSuccess(true);
       if (onPinSet) onPinSet();
       setPin('');
+      setOldPin('');
     } catch (e) {
       setPinError(e.message);
     } finally {
@@ -5077,11 +5087,12 @@ function SecurityScreen({ onBack, onPinSet }) {
 
       <form onSubmit={handlePinChange} className="space-y-4 pt-6 border-t border-neutral-900">
         <h2 className="text-sm font-semibold">Transaction PIN</h2>
+        {hasPin && <Field label="Current PIN" type="password" inputMode="numeric" value={oldPin} onChange={e => setOldPin(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••" />}
         <Field label="New PIN (4-6 digits)" type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••" />
         {pinError && <p className="text-sm text-red-400">{pinError}</p>}
-        {pinSuccess && <p className="text-sm text-emerald-400">PIN set.</p>}
-        <PrimaryButton type="submit" disabled={pinLoading || pin.length < 4}>
-          {pinLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Set PIN'}
+        {pinSuccess && <p className="text-sm text-emerald-400">{hasPin ? 'PIN changed.' : 'PIN set.'}</p>}
+        <PrimaryButton type="submit" disabled={pinLoading || pin.length < 4 || (hasPin && oldPin.length < 4)}>
+          {pinLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (hasPin ? 'Change PIN' : 'Set PIN')}
         </PrimaryButton>
       </form>
     </div>
@@ -6939,7 +6950,7 @@ function MobileAppRoot() {
         <SendScreen
           onBack={() => { setSendAgainUsername(''); setHomeView('main'); }}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setSendAgainUsername(''); setHomeView('main'); }}
-          hasPin={!!profile?.pin_hash}
+          hasPin={profile?.has_pin === true}
           onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
           initialUsername={sendAgainUsername}
         />
@@ -6957,7 +6968,7 @@ function MobileAppRoot() {
         <TVScreen
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
-          hasPin={!!profile?.pin_hash}
+          hasPin={profile?.has_pin === true}
           onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
         />
       )}
@@ -6965,7 +6976,7 @@ function MobileAppRoot() {
         <ElectricityScreen
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
-          hasPin={!!profile?.pin_hash}
+          hasPin={profile?.has_pin === true}
           onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
         />
       )}
@@ -6973,7 +6984,7 @@ function MobileAppRoot() {
         <AirtimeScreen
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
-          hasPin={!!profile?.pin_hash}
+          hasPin={profile?.has_pin === true}
           onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
         />
       )}
@@ -6981,7 +6992,7 @@ function MobileAppRoot() {
         <DataScreen
           onBack={() => setHomeView('main')}
           onDone={() => { if (profile?.id) loadUserData(profile.id); setHomeView('main'); }}
-          hasPin={!!profile?.pin_hash}
+          hasPin={profile?.has_pin === true}
           onSetupPin={() => { setHomeView('main'); setTab('profile'); setProfileView('security'); }}
         />
       )}
@@ -7042,7 +7053,7 @@ function MobileAppRoot() {
           onChanged={() => { if (profile?.id) loadUserData(profile.id); }}
         />
       )}
-      {tab === 'profile' && profileView === 'security' && <SecurityScreen onBack={() => setProfileView('main')} onPinSet={() => { if (profile?.id) loadUserData(profile.id); }} />}
+      {tab === 'profile' && profileView === 'security' && <SecurityScreen hasPin={profile?.has_pin === true} onBack={() => setProfileView('main')} onPinSet={() => { if (profile?.id) loadUserData(profile.id); }} />}
       {tab === 'profile' && profileView === 'settings' && (
         <SettingsScreen
           onBack={() => setProfileView('main')}
