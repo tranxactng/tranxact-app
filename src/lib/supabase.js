@@ -38,7 +38,13 @@ export async function signOut() {
 }
 
 export async function getProfile(userId) {
-  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+  // Explicit column list: never pull pin_hash or nin to the browser.
+  // has_pin is a generated boolean (pin_hash is not null).
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, username, full_name, business_name, created_at, daily_spending_limit, push_notifications_enabled, auto_withdraw, referred_by, is_admin, kyc_status, kyc_submitted_at, kyc_reviewed_at, kyc_review_note, nin_name, guest_account, guest_claimed_at, has_pin')
+    .eq('id', userId)
+    .maybeSingle();
   return { data, error };
 }
 
@@ -496,6 +502,14 @@ export async function setTransactionPin(pin) {
   const { error } = await supabase.rpc('set_transaction_pin', { p_pin: pin });
   if (error) throw new Error(error.message);
   return true;
+}
+
+// Changing an existing PIN requires the current PIN (server enforces a lockout
+// after 5 wrong attempts in 15 minutes). Returns false on wrong/locked.
+export async function changeTransactionPin(oldPin, newPin) {
+  const { data, error } = await supabase.rpc('change_transaction_pin', { p_old_pin: oldPin, p_new_pin: newPin });
+  if (error) throw new Error(error.message);
+  return data === true;
 }
 
 export async function verifyTransactionPin(pin) {
