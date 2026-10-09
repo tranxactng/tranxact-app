@@ -1383,6 +1383,7 @@ function HomeScreen({ balanceVisible, toggleBalance, onReceive, onSend, onSendAg
 function NotificationsScreen({ onBack }) {
   const [notifications, setNotifications] = useState(null);
   const [markingAll, setMarkingAll] = useState(false);
+  const [selectedId, setSelectedId] = useState(null); // open notification (detail view)
 
   const load = async () => {
     try {
@@ -1395,6 +1396,7 @@ function NotificationsScreen({ onBack }) {
   useEffect(() => { load(); }, []);
 
   const handleTap = async (n) => {
+    setSelectedId(n.id);
     if (!n.read) {
       setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
       try { await markNotificationRead(n.id); } catch { /* best-effort */ }
@@ -1408,6 +1410,20 @@ function NotificationsScreen({ onBack }) {
   };
 
   const unreadCount = (notifications || []).filter(n => !n.read).length;
+  const selected = selectedId ? (notifications || []).find(n => n.id === selectedId) : null;
+
+  if (selected) {
+    return (
+      <div>
+        <BackHeader title="Notification" onBack={() => setSelectedId(null)} />
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5">
+          <div className="text-base font-semibold">{selected.title}</div>
+          <div className="text-[11px] text-neutral-600 mt-1">{new Date(normalizeTimestamp(selected.created_at)).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+          <p className="text-sm text-neutral-300 mt-4 whitespace-pre-wrap break-words">{selected.message}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
