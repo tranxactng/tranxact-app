@@ -793,12 +793,31 @@ export async function getDashboardAnalytics() {
   return data;
 }
 
+// One link's money: what came in through it, and anything still being confirmed.
+export async function getPaymentLinkActivity(linkId) {
+  const { data, error } = await supabase.rpc('get_payment_link_activity', { p_link_id: linkId });
+  if (error) throw new Error(error.message);
+  return data || { total_received: 0, payments: [], pending: [], price_locked: false };
+}
+
+// Owner edits. The price only changes on an open fixed link with nobody mid-payment (the server checks).
+export async function updatePaymentLink(linkId, { title, description, amount }) {
+  const { data, error } = await supabase.rpc('update_payment_link', {
+    p_link_id: linkId,
+    p_title: title,
+    p_description: description ?? '',
+    p_amount: amount === undefined || amount === null || amount === '' ? null : Number(amount),
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function getMyPaymentLinks() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
   const { data, error } = await supabase
     .from('payment_links')
-    .select('id, slug, title, description, link_type, link_mode, amount, is_tip, status, paused_by_limit, created_at')
+    .select('id, slug, title, description, link_type, link_mode, amount, is_tip, status, paused_by_limit, business_id, created_at')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
