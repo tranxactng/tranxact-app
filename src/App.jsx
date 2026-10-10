@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Eye, EyeOff, Bell, ArrowDownToLine, ArrowUpFromLine, Link2, Smartphone, Wifi, Zap, Tv,
@@ -14,7 +14,7 @@ import {
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminSweepBtc, adminCheckSolBalance,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
-  changeUsername, updatePassword, setTransactionPin, changeTransactionPin, requestAccountDeletion, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
+  getPaymentLinkActivity, updatePaymentLink, changeUsername, updatePassword, setTransactionPin, changeTransactionPin, requestAccountDeletion, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent, sendWelcomeEmail,
@@ -432,6 +432,105 @@ function GhostButton({ children, onClick, className = '' }) {
     >
       {children}
     </button>
+  );
+}
+
+// ---------- Money typing ----------
+// The value stays plain ("25000.5") so every existing calculation keeps working;
+// only what's shown in the box gets commas ("25,000.5").
+function cleanMoney(text, decimals = 2) {
+  let t = String(text ?? '').replace(/[^0-9.]/g, '');
+  const dot = t.indexOf('.');
+  if (dot !== -1) {
+    t = t.slice(0, dot + 1) + t.slice(dot + 1).replace(/\./g, '');
+    if (decimals === 0) t = t.slice(0, dot);
+    else t = t.slice(0, dot + 1 + decimals);
+  }
+  t = t.replace(/^0+(?=\d)/, '');
+  return t;
+}
+
+function withCommas(raw) {
+  if (raw === '' || raw == null) return '';
+  const [int, dec] = String(raw).split('.');
+  const intFmt = (int || (dec !== undefined ? '0' : '')).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return dec !== undefined ? `${intFmt}.${dec}` : intFmt;
+}
+
+// "25 thousand naira", "1.5 million naira". Nothing under a thousand.
+function amountInWords(raw, currency = 'NGN') {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1000) return '';
+  const unit = currency === 'USD' ? (n === 1 ? 'dollar' : 'dollars') : 'naira';
+  const scales = [[1e12, 'trillion'], [1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']];
+  for (const [size, word] of scales) {
+    if (n >= size) {
+      const v = Math.floor((n / size) * 100) / 100;
+      return `${v.toLocaleString('en-NG', { maximumFractionDigits: 2 })} ${word} ${unit}`;
+    }
+  }
+  return '';
+}
+
+// A text box for money: commas while typing, the caret stays where you were typing,
+// and onValue gets the plain number text.
+function MoneyInput({ value, onValue, decimals = 2, className = '', ...rest }) {
+  const ref = useRef(null);
+  const caret = useRef(null);
+  const shown = withCommas(value);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || caret.current === null || document.activeElement !== el) return;
+    // Put the caret back after the same number of digits it was after.
+    let digits = caret.current, pos = 0;
+    while (pos < shown.length && digits > 0) {
+      if (/[0-9.]/.test(shown[pos])) digits--;
+      pos++;
+    }
+    try { el.setSelectionRange(pos, pos); } catch { /* some inputs don't allow it */ }
+    caret.current = null;
+  }, [shown]);
+
+  const handle = (e) => {
+    const text = e.target.value;
+    const at = e.target.selectionStart ?? text.length;
+    caret.current = text.slice(0, at).replace(/[^0-9.]/g, '').length;
+    onValue(cleanMoney(text, decimals));
+  };
+
+  return (
+    <input
+      ref={ref}
+      type="text"
+      inputMode={decimals === 0 ? 'numeric' : 'decimal'}
+      autoComplete="off"
+      value={shown}
+      onChange={handle}
+      className={className}
+      {...rest}
+    />
+  );
+}
+
+function AmountWords({ value, currency = 'NGN', className = '' }) {
+  const words = amountInWords(value, currency);
+  if (!words) return null;
+  return <div data-amount-words className={`text-[11px] text-violet-300/80 mt-1.5 ${className}`}>{words}</div>;
+}
+
+// Same look as Field, for money.
+function MoneyField({ label, value, onValue, currency = 'NGN', decimals = 2, prefix, ...rest }) {
+  const sign = prefix ?? (currency === 'USD' ? '$' : '₦');
+  return (
+    <label className="block">
+      <span className="text-sm text-neutral-400 mb-2 block">{label}</span>
+      <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-[#8B5CF6] transition">
+        {sign && <span className="text-neutral-500 text-sm font-mono">{sign}</span>}
+        <MoneyInput value={value} onValue={onValue} decimals={decimals} className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full" {...rest} />
+      </div>
+      <AmountWords value={value} currency={currency} />
+    </label>
   );
 }
 
@@ -1427,9 +1526,7 @@ function NotificationsScreen({ onBack }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <BackHeader title="Notifications" onBack={onBack} />
-      </div>
+      <BackHeader title="Notifications" onBack={onBack} />
       {unreadCount > 0 && (
         <div className="flex justify-end -mt-4 mb-4">
           <button onClick={handleMarkAll} disabled={markingAll} className="text-xs text-violet-400 hover:text-violet-300 transition disabled:opacity-50">
@@ -1563,6 +1660,9 @@ function HistoryScreen({ onBack, onSendAgain, userId }) {
 // third-party token, not the real Circle-issued asset. Not enabling until
 // separately, properly verified.
 const MULTI_NETWORK_OPTIONS = { USDT: ['TRC20', 'ERC20', 'BEP20'] };
+// How many decimals each coin is usually sent with.
+const CRYPTO_DECIMALS = { BTC: 8, ETH: 6, BNB: 5, SOL: 4, TRX: 2, USDT: 2, USDC: 2 };
+
 const NETWORK_DISPLAY_NAME = { TRC20: 'TRC20 (Tron)', ERC20: 'ERC20 (Ethereum)', BEP20: 'BEP20 (BNB Smart Chain)', BTC: 'Bitcoin network', SOL: 'Solana network' };
 
 function CryptoReceivePanel() {
@@ -2258,12 +2358,12 @@ function ElectricityScreen({ onBack, onDone, hasPin, onSetupPin }) {
           onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
           placeholder="08011111111"
         />
-        <Field
+        <MoneyField
           label="Amount"
-          inputMode="numeric"
+          decimals={0}
           value={amount}
-          onChange={e => setAmount(e.target.value.replace(/\D/g, ''))}
-          placeholder="2000"
+          onValue={setAmount}
+          placeholder="2,000"
         />
       </div>
       {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
@@ -2443,11 +2543,11 @@ function AirtimeScreen({ onBack, onDone, hasPin, onSetupPin }) {
           placeholder="08011111111"
         />
         <div>
-          <Field
+          <MoneyField
             label="Amount"
-            inputMode="numeric"
+            decimals={0}
             value={amount}
-            onChange={e => setAmount(e.target.value.replace(/\D/g, ''))}
+            onValue={setAmount}
             placeholder="500"
           />
           <div className="flex flex-wrap gap-2 mt-2.5">
@@ -2907,7 +3007,7 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
             {resolveError && <div className="text-sm text-red-400 -mt-2">{resolveError}</div>}
           </>
         )}
-        <Field label="Amount" value={amount} onChange={e => setAmount(e.target.value)} type="number" placeholder="0.00" />
+        <MoneyField label="Amount" value={amount} onValue={setAmount} placeholder="0.00" />
         <PrimaryButton onClick={() => setStep('confirm')} disabled={!canReview} className="mt-2">Review</PrimaryButton>
       </div>
     </div>
@@ -2915,6 +3015,188 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
 }
 
 // ---------- TranxactPay ----------
+// One payment link's own page: what came in through it, and edit its details.
+function LinkDetailScreen({ link, onBack, onChanged, onToggle, toggleBusy, toggleError, copy, copied, share }) {
+  const url = `https://app.tranxact.co/pay/${link.slug}`;
+  const [activity, setActivity] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [title, setTitle] = useState(link.title || '');
+  const [description, setDescription] = useState(link.description || '');
+  const [amount, setAmount] = useState(link.link_type === 'fixed' && link.amount != null ? String(Number(link.amount)) : '');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  useClearOnEdit(saveError, setSaveError);
+  const [saved, setSaved] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+
+  const load = async () => {
+    try {
+      setActivity(await getPaymentLinkActivity(link.id));
+      setLoadError('');
+    } catch (e) {
+      setLoadError(e.message || 'Could not load payments.');
+      setActivity({ total_received: 0, payments: [], pending: [], price_locked: false });
+    }
+  };
+  useEffect(() => { load(); }, [link.id]);
+
+  const editable = !link.is_tip && !link.business_id;
+  const priceLocked = activity?.price_locked === true;
+  const priceClosed = link.status === 'closed';
+  const canEditPrice = link.link_type === 'fixed' && !priceLocked && !priceClosed;
+  const origAmount = link.link_type === 'fixed' && link.amount != null ? Number(link.amount) : null;
+  const changed = title.trim() !== (link.title || '') || description.trim() !== (link.description || '') ||
+    (link.link_type === 'fixed' && Number(amount) !== origAmount);
+
+  const save = async () => {
+    setSaveError('');
+    if (!title.trim()) { setSaveError('Give it a title'); return; }
+    if (link.link_type === 'fixed' && !(Number(amount) > 0)) { setSaveError('Enter the amount'); return; }
+    setSaving(true);
+    try {
+      await updatePaymentLink(link.id, {
+        title: title.trim(),
+        description: description.trim(),
+        amount: link.link_type === 'fixed' && canEditPrice ? Number(amount) : null,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+      await onChanged();
+      load();
+    } catch (e) {
+      setSaveError(e.message || 'Could not save. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const methodLabel = (p) => p.method === 'crypto' ? (p.crypto_asset ? `Crypto · ${p.crypto_asset}` : 'Crypto') : 'Naira';
+  const when = (t) => new Date(normalizeTimestamp(t)).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+  const paidCount = activity?.payments?.length || 0;
+
+  return (
+    <div data-link-detail>
+      <BackHeader title="Payment link" onBack={onBack} />
+
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 mb-4">
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <div className="text-base font-semibold break-words min-w-0">{link.title}</div>
+          <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${link.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>{link.link_mode === 'one_time' && link.status === 'closed' ? 'paid · closed' : link.status}</span>
+        </div>
+        <div className="text-xs text-neutral-500 font-mono mb-1">{link.link_type === 'fixed' ? fmtNaira(link.amount) : 'Flexible amount'}</div>
+        <div className="text-[11px] text-neutral-600 mb-4">{link.link_mode === 'recurring' ? 'Recurring · stays open for repeat payments' : 'One-time · closes after it is paid'}</div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+            <div className="text-[11px] text-neutral-500 mb-1">Received</div>
+            <div className="font-mono text-lg font-bold" data-link-total>{activity ? fmtNaira(activity.total_received) : '…'}</div>
+          </div>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+            <div className="text-[11px] text-neutral-500 mb-1">Payments</div>
+            <div className="font-mono text-lg font-bold">{activity ? paidCount : '…'}</div>
+          </div>
+        </div>
+
+        {link.link_mode === 'recurring' && link.status !== 'closed' && (
+          <div className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 mb-3">
+            <span className="text-xs text-neutral-400">{link.paused_by_limit ? 'Paused: receiving limit reached' : 'Accepting payments'}</span>
+            <button onClick={onToggle} disabled={toggleBusy || link.paused_by_limit} className={`px-3.5 py-1 rounded-full text-xs font-semibold transition ${link.status === 'active' ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-300'} ${link.paused_by_limit ? 'opacity-40' : ''}`}>{toggleBusy ? '…' : link.status === 'active' ? 'On' : 'Off'}</button>
+          </div>
+        )}
+        {toggleError && <p className="text-xs text-red-400 mb-2">{toggleError}</p>}
+
+        {showQr && link.status === 'active' && (
+          <div className="flex flex-col items-center bg-neutral-950 border border-neutral-800 rounded-lg p-4 mb-3">
+            <div className="bg-white rounded-lg p-2 mb-3"><BrandedQR data={url} size={144} /></div>
+            <div className="text-violet-400 text-xs font-mono break-all text-center">{url.replace('https://', '')}</div>
+          </div>
+        )}
+        <div className={`grid gap-2 ${link.status === 'active' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          {link.status === 'active' && (
+            <button onClick={() => setShowQr(!showQr)} className="flex items-center justify-center gap-1.5 bg-neutral-800 rounded-lg py-2 text-xs"><QrCode className="w-3.5 h-3.5" /> QR</button>
+          )}
+          <button onClick={() => copy(url, `detail-${link.slug}`)} className="flex items-center justify-center gap-1.5 bg-neutral-800 rounded-lg py-2 text-xs">
+            {copied === `detail-${link.slug}` ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied === `detail-${link.slug}` ? 'Copied' : 'Copy'}
+          </button>
+          <button onClick={() => share(url, link.title)} className="flex items-center justify-center gap-1.5 bg-neutral-800 rounded-lg py-2 text-xs"><Share2 className="w-3.5 h-3.5" /> Share</button>
+        </div>
+      </div>
+
+      {editable && (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3 mb-4" data-link-edit>
+          <h4 className="text-sm font-semibold">Edit details</h4>
+          <Field label="Title" value={title} onChange={e => { setSaved(false); setTitle(e.target.value); }} maxLength={80} placeholder="What's this for?" />
+          <label className="block">
+            <span className="text-sm text-neutral-400 mb-2 block">Description <span className="text-neutral-600">(optional)</span></span>
+            <textarea
+              value={description}
+              onChange={e => { setSaved(false); setDescription(e.target.value); }}
+              maxLength={500}
+              rows={3}
+              placeholder="Shown to the payer on the checkout page"
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-white placeholder-neutral-600 outline-none focus:border-[#8B5CF6] transition resize-none"
+            />
+          </label>
+          {link.link_type === 'fixed' && (
+            <div>
+              {canEditPrice ? (
+                <MoneyField label="Price (NGN)" value={amount} onValue={v => { setSaved(false); setAmount(v); }} placeholder="0.00" />
+              ) : (
+                <div>
+                  <span className="text-sm text-neutral-400 mb-2 block">Price (NGN)</span>
+                  <div className="bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-sm font-mono text-neutral-400">{fmtNaira(link.amount)}</div>
+                  <p className="text-[11px] text-neutral-500 mt-1.5">{priceClosed ? 'This link is closed, so its price can\'t change.' : 'Someone is paying this link right now. You can change the price once that payment is confirmed.'}</p>
+                </div>
+              )}
+              {canEditPrice && <p className="text-[11px] text-neutral-600 mt-1.5">A new price applies to payments made after you save.</p>}
+            </div>
+          )}
+          {saveError && <p className="text-sm text-red-400">{saveError}</p>}
+          <PrimaryButton onClick={save} disabled={saving || !changed}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? 'Saved' : 'Save changes'}
+          </PrimaryButton>
+        </div>
+      )}
+
+      <h4 className="text-sm font-semibold mb-3">Payments</h4>
+      {loadError && <p className="text-xs text-red-400 mb-2">{loadError}</p>}
+      {activity === null ? (
+        <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+      ) : (
+        <div className="space-y-2" data-link-payments>
+          {activity.pending.map((p, i) => (
+            <div key={`p${i}`} className="flex items-center justify-between bg-neutral-900 border border-amber-500/25 rounded-xl px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{p.customer_name || 'Someone'}</div>
+                <div className="text-xs text-neutral-500">{methodLabel(p)} · {when(p.created_at)}</div>
+              </div>
+              <div className="text-right flex-shrink-0 ml-3">
+                <div className="font-mono text-sm text-neutral-300">{p.claimed_amount ? fmtNaira(p.claimed_amount) : '—'}</div>
+                <div className="text-[11px] text-amber-400">Being confirmed</div>
+              </div>
+            </div>
+          ))}
+          {activity.payments.map((p, i) => (
+            <div key={`d${i}`} className="flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{p.customer_name || 'Payment'}</div>
+                <div className="text-xs text-neutral-500">{methodLabel(p)} · {when(p.created_at)}</div>
+              </div>
+              <div className="text-right flex-shrink-0 ml-3">
+                <div className="font-mono text-sm text-emerald-400">+{fmtNaira(p.amount)}</div>
+                <div className="text-[11px] text-neutral-600 capitalize">{p.status}</div>
+              </div>
+            </div>
+          ))}
+          {activity.pending.length === 0 && activity.payments.length === 0 && (
+            <p className="text-sm text-neutral-500 text-center py-6">No payments to this link yet.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TranxactPayScreen({ onClose, username }) {
   const [tab, setTab] = useState('getpaid'); // getpaid | tip | payments
 
@@ -2922,13 +3204,29 @@ function TranxactPayScreen({ onClose, username }) {
   // same way the on-screen arrow does. One history entry is added on open.
   useEffect(() => {
     if (!window.history.state?.tranxactPay) window.history.pushState({ tranxactPay: true }, '');
-    const onPop = () => onClose();
+    // Back from a link's own page lands on Get Paid; back from Get Paid leaves it.
+    const onPop = (e) => {
+      if (e.state?.tranxactPay) setOpenLinkId(null);
+      else onClose();
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const goBack = () => {
     if (window.history.state?.tranxactPay) window.history.back(); // popstate -> onClose
     else onClose();
+  };
+
+  const [openLinkId, setOpenLinkId] = useState(null); // a link's own page
+  const [highlightId, setHighlightId] = useState(null); // glows briefly in Your Links
+  const [createdSheet, setCreatedSheet] = useState(false);
+  const openLink = (id) => {
+    window.history.pushState({ tranxactPay: true, linkDetail: id }, '');
+    setOpenLinkId(id);
+  };
+  const closeLink = () => {
+    if (window.history.state?.linkDetail) window.history.back(); // popstate closes it
+    else setOpenLinkId(null);
   };
 
   const [links, setLinks] = useState(null);
@@ -2996,6 +3294,7 @@ function TranxactPayScreen({ onClose, username }) {
         amount: newType === 'fixed' ? Number(newAmount) : undefined,
       });
       setJustCreated({ ...res, link_mode: res.link_mode || mode });
+      setCreatedSheet(true);
       setNewTitle('');
       setNewAmount('');
       setModePicker(false);
@@ -3049,6 +3348,28 @@ function TranxactPayScreen({ onClose, username }) {
 
   const totalReceived = (payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
 
+  // Closing the "link created" sheet takes you down to the new link in Your Links.
+  const finishCreated = () => {
+    setCreatedSheet(false);
+    if (justCreated?.id) setHighlightId(justCreated.id);
+  };
+  const copyCreated = () => {
+    copy(justCreated.url, 'new');
+    setTimeout(finishCreated, 700);
+  };
+  const shareCreated = async () => {
+    await share(justCreated.url, 'Payment link');
+    finishCreated();
+  };
+
+  useEffect(() => {
+    if (!highlightId || !links) return;
+    const el = document.querySelector(`[data-link-id="${highlightId}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const t = setTimeout(() => setHighlightId(null), 2600);
+    return () => clearTimeout(t);
+  }, [highlightId, links]);
+
   const LinkCard = ({ link }) => {
     const url = `https://app.tranxact.co/pay/${link.slug}`;
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}`;
@@ -3059,13 +3380,15 @@ function TranxactPayScreen({ onClose, username }) {
   Pay with Tranxact
 </a>`;
     return (
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium">{link.title}</span>
+      <div data-link-id={link.id} className={`bg-neutral-900 border rounded-xl p-4 transition-colors duration-700 ${highlightId === link.id ? 'border-[#8B5CF6] shadow-[0_0_0_3px_rgba(139,92,246,0.25)]' : 'border-neutral-800'}`}>
+        <button type="button" data-open-link onClick={() => openLink(link.id)} className="w-full text-left">
+        <div className="flex items-center justify-between mb-2 gap-2">
+          <span className="text-sm font-medium flex items-center gap-1 min-w-0"><span className="truncate">{link.title}</span><ChevronRight className="w-3.5 h-3.5 text-neutral-600 flex-shrink-0" /></span>
           <span data-link-status className={`text-xs px-2 py-0.5 rounded-full ${link.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>{link.link_mode === 'one_time' && link.status === 'closed' ? 'paid · closed' : link.status}</span>
         </div>
         <div className="text-xs text-neutral-500 mb-1 font-mono">{link.link_type === 'fixed' ? fmtNaira(link.amount) : 'Flexible amount'}</div>
         <div className="text-[11px] text-neutral-600 mb-3">{link.link_mode === 'recurring' ? 'Recurring · stays open for repeat payments' : 'One-time · closes after it is paid'}</div>
+        </button>
         {link.link_mode === 'recurring' && link.status !== 'closed' && (
           <div className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 mb-3" data-link-toggle>
             <span className="text-xs text-neutral-400">{link.paused_by_limit ? 'Paused: receiving limit reached' : 'Accepting payments'}</span>
@@ -3117,6 +3440,23 @@ function TranxactPayScreen({ onClose, username }) {
     );
   };
 
+  const openLinkRow = openLinkId ? (links || []).find(l => l.id === openLinkId) : null;
+  if (openLinkRow) {
+    return (
+      <LinkDetailScreen
+        link={openLinkRow}
+        onBack={closeLink}
+        onChanged={loadLinks}
+        onToggle={() => handleToggle(openLinkRow)}
+        toggleBusy={toggleBusy === openLinkRow.id}
+        toggleError={toggleError[openLinkRow.id]}
+        copy={copy}
+        copied={copied}
+        share={share}
+      />
+    );
+  }
+
   return (
     <div>
         <BackHeader title="Get Paid" onBack={goBack} />
@@ -3139,7 +3479,7 @@ function TranxactPayScreen({ onClose, username }) {
                 <button onClick={() => setNewType('fixed')} className={`rounded-xl py-2.5 text-xs font-medium border transition ${newType === 'fixed' ? 'bg-white text-black border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>Fixed amount</button>
                 <button onClick={() => setNewType('flexible')} className={`rounded-xl py-2.5 text-xs font-medium border transition ${newType === 'flexible' ? 'bg-white text-black border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>Flexible amount</button>
               </div>
-              {newType === 'fixed' && <Field label="Amount (NGN)" type="number" value={newAmount} onChange={e => setNewAmount(e.target.value)} placeholder="0.00" />}
+              {newType === 'fixed' && <MoneyField label="Amount (NGN)" value={newAmount} onValue={setNewAmount} placeholder="0.00" />}
               {createError && <p className="text-sm text-red-400">{createError}</p>}
               <PrimaryButton onClick={handleCreate} disabled={creating}>
                 {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Link'}
@@ -3166,18 +3506,24 @@ function TranxactPayScreen({ onClose, username }) {
               )}
             </div>
 
-            {justCreated && (
-              <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4 text-center">
-                <div className="bg-white rounded-lg p-1.5 mb-3 inline-block"><BrandedQR data={justCreated.url} size={112} /></div>
-                <div className="text-violet-300 text-xs font-mono break-all mb-1">{justCreated.url}</div>
-                <div className="text-[11px] text-neutral-500 mb-3">{justCreated.link_mode === 'recurring' ? 'Recurring link. It stays open until you turn it off.' : 'One-time link. It closes after it is paid.'}</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <GhostButton onClick={() => copy(justCreated.url, 'new')}>
-                    {copied === 'new' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied === 'new' ? 'Copied' : 'Copy'}
-                  </GhostButton>
-                  <GhostButton onClick={() => share(justCreated.url, 'Payment link')}><Share2 className="w-4 h-4" /> Share</GhostButton>
+            {createdSheet && justCreated && createPortal(
+              <div className="text-white" style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', color: '#fff' }} data-created-sheet role="dialog" aria-modal="true" aria-label="Your link is ready">
+                <div className="backdrop-blur-sm" style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.7)' }} onClick={finishCreated} />
+                <div className="bg-neutral-950 border border-neutral-800 p-6 text-white text-center" style={{ position: 'relative', width: '100%', maxWidth: 480, borderRadius: '24px 24px 0 0', color: '#fff', paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
+                  <h3 className="text-lg font-bold mb-1">Your link is ready</h3>
+                  <p className="text-xs text-neutral-500 mb-4">{justCreated.link_mode === 'recurring' ? 'Recurring link. It stays open until you turn it off.' : 'One-time link. It closes after it is paid.'}</p>
+                  <div className="bg-white rounded-lg p-1.5 mb-3 inline-block"><BrandedQR data={justCreated.url} size={128} /></div>
+                  <div className="text-violet-300 text-xs font-mono break-all mb-5">{justCreated.url}</div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <GhostButton onClick={copyCreated}>
+                      {copied === 'new' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied === 'new' ? 'Copied' : 'Copy'}
+                    </GhostButton>
+                    <GhostButton onClick={shareCreated}><Share2 className="w-4 h-4" /> Share</GhostButton>
+                  </div>
+                  <button onClick={finishCreated} data-created-done className="w-full text-sm text-neutral-500 hover:text-white py-2 mt-1 transition">Done</button>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
 
             <div>
@@ -3348,10 +3694,9 @@ function RatesScreen({ onBack }) {
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-1 w-full">
                 <span className="text-2xl font-mono font-semibold text-neutral-500">$</span>
-                <input
-                  type="number"
+                <MoneyInput
                   value={calcAmount}
-                  onChange={e => setCalcAmount(e.target.value)}
+                  onValue={setCalcAmount}
                   placeholder="0.00"
                   className="bg-transparent text-2xl font-mono font-semibold outline-none w-full text-white placeholder-neutral-700"
                 />
@@ -3364,6 +3709,7 @@ function RatesScreen({ onBack }) {
                 {rates.map(r => <option key={r.coin} value={r.coin} className="bg-neutral-900">{r.coin}</option>)}
               </select>
             </div>
+            <AmountWords value={calcAmount} currency="USD" />
             <p className="text-xs text-neutral-600 mt-2">Paid in {calcAsset}</p>
           </div>
 
@@ -4344,14 +4690,14 @@ function AdminScreen({ onRefresh }) {
               <span className="text-sm text-neutral-400 mb-2 block">Amount received (USD)</span>
               <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
                 <span className="text-neutral-500 font-mono">$</span>
-                <input
-                  type="number"
+                <MoneyInput
                   value={amountUsd}
-                  onChange={e => setAmountUsd(e.target.value)}
+                  onValue={setAmountUsd}
                   placeholder="0.00"
                   className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full font-mono"
                 />
               </div>
+              <AmountWords value={amountUsd} currency="USD" />
               <p className="text-xs text-neutral-600 mt-1.5">
                 Enter the USD value of what was received, not the raw coin quantity. Most wallets/explorers show this directly.
               </p>
@@ -4383,7 +4729,7 @@ function AdminScreen({ onRefresh }) {
           </div>
         ) : (
           <div className="space-y-3">
-            <Field label="Amount received (NGN)" type="number" value={bankAmount} onChange={e => setBankAmount(e.target.value)} placeholder="0.00" />
+            <MoneyField label="Amount received (NGN)" value={bankAmount} onValue={setBankAmount} placeholder="0.00" />
             {(() => {
               const gross = parseFloat(bankAmount) || 0;
               if (gross <= 0) return null;
@@ -4453,17 +4799,17 @@ function AdminScreen({ onRefresh }) {
               </select>
               <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
                 <span className="text-neutral-500 font-mono">$</span>
-                <input
-                  type="number"
+                <MoneyInput
                   value={tpAmountUsd}
-                  onChange={e => setTpAmountUsd(e.target.value)}
+                  onValue={setTpAmountUsd}
                   placeholder="Amount received (USD)"
                   className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full font-mono"
                 />
               </div>
+              <AmountWords value={tpAmountUsd} currency="USD" />
             </div>
           ) : (
-            <Field label="Amount received (NGN)" type="number" value={tpBankAmount} onChange={e => setTpBankAmount(e.target.value)} placeholder="0.00" />
+            <MoneyField label="Amount received (NGN)" value={tpBankAmount} onValue={setTpBankAmount} placeholder="0.00" />
           )}
           {tpError && <p className="text-sm text-red-400">{tpError}</p>}
           {tpSuccess && (
@@ -4539,10 +4885,9 @@ function AdminScreen({ onRefresh }) {
               <div className="text-xs text-neutral-500 mb-2">USD/NGN base rate</div>
               <div className="flex items-center gap-2">
                 <span className="text-neutral-500">₦</span>
-                <input
-                  type="number"
+                <MoneyInput
                   value={baseRateInput}
-                  onChange={e => setBaseRateInput(e.target.value)}
+                  onValue={setBaseRateInput}
                   className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
                 />
                 <button onClick={saveBaseRate} disabled={rateSaving} className="text-xs bg-violet-600 rounded-lg px-3 py-2 font-semibold disabled:opacity-50 flex-shrink-0">
@@ -5267,7 +5612,7 @@ function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
       <div>
         <h2 className="text-sm font-semibold mb-3">Daily spending limit</h2>
         <div className="flex gap-2">
-          <Field label="Amount (NGN, optional)" type="number" value={limit} onChange={e => setLimit(e.target.value)} placeholder="No limit set" />
+          <MoneyField label="Amount (NGN, optional)" value={limit} onValue={setLimit} placeholder="No limit set" />
         </div>
         <p className="text-xs text-neutral-600 mt-2">Applies to sends and withdrawals. Resets on a rolling 24-hour basis. Leave blank for no limit.</p>
         {limitSaved && <p className="text-sm text-emerald-400 mt-2">Saved.</p>}
@@ -5323,18 +5668,14 @@ function CheckoutPage({ slug }) {
   // A number typed while on one tab means a different currency on another —
   // reset on switch so it's never misread (e.g. a naira figure silently
   // treated as dollars after tapping into Crypto).
-  useEffect(() => { setFlexAmount(''); }, [payTab]);
+  useEffect(() => { setFlexAmount(''); setCryptoAsset(null); setCryptoNetwork(null); }, [payTab]);
+  // The 15-minute window starts when the payer actually sees an address, not when the page opened.
+  useEffect(() => { if (cryptoAsset && cryptoNetwork) setSecondsLeft(15 * 60); }, [cryptoAsset, cryptoNetwork]);
 
   useEffect(() => {
     getPublicPaymentLink(slug)
       .then(data => {
         setLink(data);
-        const firstKey = data?.crypto_addresses ? Object.keys(data.crypto_addresses)[0] : null;
-        if (firstKey) {
-          const [symbol, network] = firstKey.split('-');
-          setCryptoAsset(symbol);
-          setCryptoNetwork(network);
-        }
       })
       .catch(e => { setError(e.message); setLink(null); });
     supabase.rpc('get_public_rates').then(({ data }) => setRates(data || []));
@@ -5369,7 +5710,11 @@ function CheckoutPage({ slug }) {
   const usdAmount = link?.link_type === 'flexible' && flexIsUsd
     ? (parseFloat(flexAmount) || 0)
     : (rateRow && amountNgn > 0 ? amountNgn / Number(rateRow.effective_rate) : 0);
-  const cryptoAmount = rateRow && rateRow.usd_market_price > 0 ? usdAmount / Number(rateRow.usd_market_price) : 0;
+  const cryptoAmountRaw = rateRow && rateRow.usd_market_price > 0 ? usdAmount / Number(rateRow.usd_market_price) : 0;
+  // Rounded UP to the coin's usual precision so a payer who sends exactly this never falls short.
+  const cryptoDp = CRYPTO_DECIMALS[cryptoAsset] ?? 6;
+  const cryptoAmount = cryptoAmountRaw > 0 ? Math.ceil(cryptoAmountRaw * 10 ** cryptoDp) / 10 ** cryptoDp : 0;
+  const cryptoAmountText = cryptoAmount > 0 ? cryptoAmount.toFixed(cryptoDp) : '';
   // link.crypto_addresses is keyed "SYMBOL-NETWORK" (e.g. "USDT-TRC20") since
   // some coins exist on more than one network with genuinely different
   // addresses. Group into symbols for the primary picker, with networks
@@ -5499,24 +5844,24 @@ function CheckoutPage({ slug }) {
 
           <p className="text-xs text-neutral-500 mb-1.5">
             {link.is_tip ? 'Tip amount' : 'Amount due'}
-            {link.link_type === 'flexible' ? (flexIsUsd ? ' (USD)' : ' (NGN)') : (payTab === 'crypto' ? ' (USD)' : '')}
+            {link.link_type === 'flexible' ? (flexIsUsd ? ' (USD)' : ' (NGN)') : ''}
           </p>
           {link.link_type === 'fixed' ? (
             <div className="font-mono text-3xl font-bold mb-5">
-              {payTab === 'crypto' && rateRow ? `$${usdAmount.toFixed(2)}` : fmtNaira(link.amount)}
+              {fmtNaira(link.amount)}
             </div>
           ) : (
             <div className="mb-5">
               <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
                 <span className="text-neutral-500 font-mono text-xl">{flexIsUsd ? '$' : '₦'}</span>
-                <input
-                  type="number"
+                <MoneyInput
                   value={flexAmount}
-                  onChange={e => setFlexAmount(e.target.value)}
+                  onValue={setFlexAmount}
                   placeholder="0.00"
                   className="bg-transparent outline-none font-mono text-xl font-bold w-full text-white placeholder-neutral-700"
                 />
               </div>
+              <AmountWords value={flexAmount} currency={flexIsUsd ? 'USD' : 'NGN'} />
             </div>
           )}
           {link.description && <p className="text-xs text-neutral-500 mb-5 -mt-3">{link.description}</p>}
@@ -5683,81 +6028,95 @@ function CheckoutPage({ slug }) {
           )}
 
           {payTab === 'crypto' && (
-            <div>
+            <div data-crypto-checkout>
               {cryptoOptions.length === 0 ? (
                 <p className="text-sm text-neutral-500 text-center py-6">No crypto option available for this link yet.</p>
+              ) : !cryptoAsset ? (
+                <div data-crypto-step="coin">
+                  <div className="text-xs text-neutral-500 mb-2">Choose a crypto</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {cryptoOptions.map(symbol => (
+                      <button
+                        key={symbol}
+                        data-coin={symbol}
+                        onClick={() => { setCryptoAsset(symbol); setCryptoNetwork(cryptoBySymbol[symbol].length === 1 ? cryptoBySymbol[symbol][0] : null); }}
+                        className="flex flex-col items-center gap-1.5 py-3.5 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-[#8B5CF6] transition"
+                      >
+                        <CoinIcon symbol={symbol} size={28} />
+                        <span className="text-xs font-medium text-neutral-200">{symbol}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ) : (
                 <>
-                  <div className="mb-4">
-                    <button
-                      onClick={() => setCoinPickerOpen(!coinPickerOpen)}
-                      className="w-full flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <CoinIcon symbol={cryptoAsset} size={24} />
-                        <span className="text-sm font-medium">Pay with {cryptoAsset}</span>
-                      </div>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={`w-4 h-4 text-neutral-500 transition-transform ${coinPickerOpen ? 'rotate-180' : ''}`}><path d="M6 9l6 6 6-6"/></svg>
-                    </button>
-
-                    {coinPickerOpen && (
-                      <div className="mt-2 bg-neutral-900 border border-neutral-800 rounded-xl p-2 grid grid-cols-4 gap-2">
-                        {cryptoOptions.map(symbol => (
-                          <button
-                            key={symbol}
-                            onClick={() => { setCryptoAsset(symbol); setCryptoNetwork(cryptoBySymbol[symbol][0]); setCoinPickerOpen(false); }}
-                            className={`flex flex-col items-center gap-1.5 py-3 rounded-lg transition ${cryptoAsset === symbol ? 'bg-white' : 'bg-neutral-950'}`}
-                          >
-                            <CoinIcon symbol={symbol} size={24} />
-                            <span className={`text-xs font-medium ${cryptoAsset === symbol ? 'text-black' : 'text-neutral-400'}`}>{symbol}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                  <div className="flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 mb-4">
+                    <div className="flex items-center gap-2.5">
+                      <CoinIcon symbol={cryptoAsset} size={24} />
+                      <span className="text-sm font-medium">Pay with {cryptoAsset}</span>
+                    </div>
+                    <button data-change-coin onClick={() => { setCryptoAsset(null); setCryptoNetwork(null); }} className="text-xs text-violet-400">Change</button>
                   </div>
 
                   {networksForSelected.length > 1 && (
-                    <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-                      {networksForSelected.map(net => (
-                        <button
-                          key={net}
-                          onClick={() => setCryptoNetwork(net)}
-                          className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition ${cryptoNetwork === net ? 'bg-violet-600 text-white border-violet-600' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}
-                        >
-                          {NETWORK_DISPLAY_NAME[net] || net}
+                    <div className="mb-4" data-crypto-step="network">
+                      <div className="text-xs text-neutral-500 mb-2">Choose a network</div>
+                      <div className="flex flex-wrap gap-2">
+                        {networksForSelected.map(net => (
+                          <button
+                            key={net}
+                            data-network={net}
+                            onClick={() => setCryptoNetwork(net)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${cryptoNetwork === net ? 'bg-[#8B5CF6] text-white border-[#8B5CF6]' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}
+                          >
+                            {NETWORK_DISPLAY_NAME[net] || net}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {cryptoNetwork && selectedAddress && (
+                    <div data-crypto-step="pay">
+                      <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2.5 mb-4 flex items-start gap-2">
+                        <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
+                        <p className="text-xs text-amber-300">Send only {cryptoAsset} on the {NETWORK_DISPLAY_NAME[cryptoNetwork] || cryptoNetwork} to this address. Sending any other asset or network may result in permanent loss.</p>
+                      </div>
+
+                      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-3">
+                        <div className="text-[11px] text-neutral-500 mb-1">Amount to send</div>
+                        {cryptoAmountText ? (
+                          <button data-copy-amount onClick={() => copy(cryptoAmountText, 'crypto-amount')} className="w-full flex items-center justify-between text-left">
+                            <span className="font-mono text-xl font-bold break-all">{cryptoAmountText} <span className="text-sm text-neutral-400">{cryptoAsset}</span></span>
+                            {copied === 'crypto-amount' ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 ml-2" /> : <Copy className="w-4 h-4 text-neutral-500 flex-shrink-0 ml-2" />}
+                          </button>
+                        ) : (
+                          <div className="text-sm text-neutral-500">{link.link_type === 'flexible' ? 'Enter an amount above to see how much to send.' : 'Getting the live rate…'}</div>
+                        )}
+                        {cryptoAmountText && (
+                          <div className="text-[11px] text-neutral-500 mt-1">≈ ${usdAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{amountNgn > 0 ? ` · ${fmtNaira(amountNgn)}` : ''}</div>
+                        )}
+                      </div>
+
+                      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
+                        <div className="text-[11px] text-neutral-500 mb-2">Wallet address</div>
+                        <button data-copy-address onClick={() => copy(selectedAddress, 'crypto')} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 mb-3">
+                          <span className="font-mono text-xs text-neutral-300 break-all text-left">{selectedAddress}</span>
+                          {copied === 'crypto' ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 ml-2" /> : <Copy className="w-4 h-4 text-neutral-500 flex-shrink-0 ml-2" />}
                         </button>
-                      ))}
+                        <div className="flex justify-center"><div className="bg-white rounded-lg p-2"><BrandedQR data={selectedAddress} size={128} /></div></div>
+                      </div>
+
+                      <div className="flex items-center justify-center gap-1.5 text-xs text-amber-400 mb-4">
+                        Expires in {fmtCountdown(secondsLeft)}
+                      </div>
+
+                      {sendError && <p className="text-sm text-red-400 mb-3 text-center">{sendError}</p>}
+                      <PrimaryButton onClick={() => handleSent('crypto')} disabled={sending || !customerDetailsComplete || !cryptoAmountText}>
+                        {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "I've sent the payment"}
+                      </PrimaryButton>
                     </div>
                   )}
-
-                  {usdAmount > 0 && rateRow && (
-                    <div className="text-center mb-4">
-                      <div className="text-sm text-neutral-400">Send</div>
-                      <div className="font-mono text-2xl font-bold">{cryptoAmount.toFixed(6)} {cryptoAsset}</div>
-                    </div>
-                  )}
-
-                  <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2.5 mb-4 flex items-start gap-2">
-                    <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
-                    <p className="text-xs text-amber-300">Send only {cryptoAsset} on the {NETWORK_DISPLAY_NAME[cryptoNetwork] || cryptoNetwork || 'correct network'} to this address. Sending any other asset may result in permanent loss.</p>
-                  </div>
-
-                  <div className="flex flex-col items-center bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
-                    <div className="bg-white rounded-lg p-2 mb-3"><BrandedQR data={selectedAddress} size={128} /></div>
-                    <button onClick={() => copy(selectedAddress, 'crypto')} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5">
-                      <span className="font-mono text-xs text-neutral-300 break-all text-left">{selectedAddress}</span>
-                      {copied === 'crypto' ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 ml-2" /> : <Copy className="w-4 h-4 text-neutral-500 flex-shrink-0 ml-2" />}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-center gap-1.5 text-xs text-amber-400 mb-4">
-                    Expires in {fmtCountdown(secondsLeft)}
-                  </div>
-
-                  {sendError && <p className="text-sm text-red-400 mb-3 text-center">{sendError}</p>}
-                  <PrimaryButton onClick={() => handleSent('crypto')} disabled={sending || !customerDetailsComplete}>
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "I've sent the payment"}
-                  </PrimaryButton>
                 </>
               )}
             </div>
@@ -6549,7 +6908,8 @@ function PaymentNoticesPanel({ rates, onChanged, view = 'queue' }) {
         {kind !== 'done' && confirmId === n.id && (
           <div className="mt-3 pt-3 border-t border-neutral-800 space-y-2" data-confirm-form>
             <label className="text-xs text-neutral-400 block">{n.method === 'crypto' ? `Amount received (USD, ${n.crypto_asset})` : 'Amount received (NGN)'}</label>
-            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm font-mono outline-none" />
+            <MoneyInput value={amount} onValue={setAmount} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm font-mono outline-none" />
+            <AmountWords value={amount} currency={n.method === 'crypto' ? 'USD' : 'NGN'} />
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => setConfirmId(null)} className="border border-neutral-800 rounded-xl py-2.5 text-sm">Cancel</button>
               <button onClick={() => settle(n)} disabled={busy || !(Number(amount) > 0)} data-confirm-go className="bg-emerald-500 text-black font-semibold rounded-xl py-2.5 text-sm disabled:opacity-50">{busy ? '…' : 'Confirm & credit'}</button>
