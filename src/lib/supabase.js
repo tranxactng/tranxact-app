@@ -991,7 +991,7 @@ export async function adminGetOverviewStats() {
   return callAdminFunction('admin-overview-stats', {});
 }
 
-export async function requestWithdrawal({ amount, bank_name, bank_code, account_number, account_name }) {
+export async function requestWithdrawal({ amount, bank_name, bank_code, account_number, account_name, name_verified = true }) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not signed in');
 
@@ -1001,7 +1001,7 @@ export async function requestWithdrawal({ amount, bank_name, bank_code, account_
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ amount, bank_name, bank_code, account_number, account_name }),
+    body: JSON.stringify({ amount, bank_name, bank_code, account_number, account_name, name_verified }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Withdrawal request failed');
@@ -1039,7 +1039,7 @@ export async function resolveBankAccount(accountNumber, bankCode) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Could not resolve account');
-  return data; // { account_name, account_number }
+  return data; // { account_name, account_number } or { account_name: null, lookup: 'unavailable' }
 }
 
 export async function getMyWithdrawals() {
