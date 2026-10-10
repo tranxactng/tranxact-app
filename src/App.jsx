@@ -14,7 +14,7 @@ import {
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminSweepBtc, adminCheckSolBalance,
   getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
-  changeUsername, updatePassword, setTransactionPin, changeTransactionPin, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
+  changeUsername, updatePassword, setTransactionPin, changeTransactionPin, requestAccountDeletion, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent, sendWelcomeEmail,
@@ -4926,7 +4926,7 @@ function AdminScreen({ onRefresh }) {
   );
 }
 
-function AccountDetailsScreen({ onBack, profile, onUpdated }) {
+function AccountDetailsScreen({ onBack, profile, onUpdated, onOpenUsername, onDeleteAccount }) {
   const [email, setEmail] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(profile?.full_name || '');
@@ -4957,14 +4957,13 @@ function AccountDetailsScreen({ onBack, profile, onUpdated }) {
   };
 
   const rows = [
-    { label: 'Username', value: profile?.username ? `@${profile.username}` : '—' },
     { label: 'Email', value: email || '—' },
     { label: 'Member since', value: memberSince },
   ];
 
   return (
     <div>
-      <BackHeader title="Account Details" onBack={onBack} />
+      <BackHeader title="My profile" onBack={onBack} />
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
         <div className="px-4 py-4">
           <div className="flex items-center justify-between">
@@ -4992,6 +4991,13 @@ function AccountDetailsScreen({ onBack, profile, onUpdated }) {
           )}
           {nameError && <p className="text-xs text-red-400 mt-2">{nameError}</p>}
         </div>
+        <button onClick={onOpenUsername} className="w-full flex items-center justify-between px-4 py-4 text-left">
+          <span className="text-sm text-neutral-500">Username</span>
+          <span className="flex items-center gap-2">
+            <span className="text-sm font-medium">{profile?.username ? `@${profile.username}` : '—'}</span>
+            <span className="text-xs text-violet-400">Change</span>
+          </span>
+        </button>
         {rows.map(r => (
           <div key={r.label} className="flex items-center justify-between px-4 py-4">
             <span className="text-sm text-neutral-500">{r.label}</span>
@@ -4999,6 +5005,117 @@ function AccountDetailsScreen({ onBack, profile, onUpdated }) {
           </div>
         ))}
       </div>
+
+      <div className="mt-6 bg-neutral-950 border border-neutral-800 rounded-2xl">
+        <button onClick={onDeleteAccount} className="w-full flex items-center justify-between px-4 py-4 text-left">
+          <span className="text-sm font-medium text-red-400">Delete account</span>
+          <ChevronRight className="w-4 h-4 text-neutral-600" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const DELETE_BLOCKER_TEXT = {
+  balance: 'Withdraw your remaining wallet balance.',
+  pending_withdrawal: 'Wait for your pending withdrawal to finish.',
+  pending_transaction: 'Wait for your pending transaction to finish.',
+  referral_earnings: 'Withdraw your referral earnings.',
+  pending_bill: 'Wait for your pending bill payment to finish.',
+  pending_transfer: 'Wait for your pending transfer to finish.',
+  open_payments: 'Wait for open payments on your payment links to finish.',
+  admin_account: 'Admin accounts cannot be deleted from the app. Please contact support.',
+};
+
+function DeleteAccountScreen({ onBack, hasPin, onSetPin, onSignOut }) {
+  const [pin, setPin] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [blockers, setBlockers] = useState([]);
+  const [scheduledFor, setScheduledFor] = useState(null);
+
+  const canSubmit = pin.length >= 4 && confirmText.trim().toUpperCase() === 'DELETE' && !loading;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    setError('');
+    setBlockers([]);
+    setLoading(true);
+    try {
+      const r = await requestAccountDeletion(pin);
+      if (r?.ok) setScheduledFor(r.scheduled_for);
+      else if (r?.error === 'wrong_pin') setError('Incorrect PIN. Too many wrong attempts will lock this for 15 minutes.');
+      else if (r?.error === 'blocked') setBlockers(Array.isArray(r.blockers) ? r.blockers : []);
+      else if (r?.error === 'pin_required') setError('Set a transaction PIN first.');
+      else setError('Could not schedule the deletion. Please try again.');
+    } catch (err) {
+      setError(err.message || 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+      setPin('');
+    }
+  };
+
+  if (scheduledFor) {
+    const when = new Date(scheduledFor).toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' });
+    return (
+      <div>
+        <BackHeader title="Delete account" onBack={onSignOut} />
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-3">
+          <div className="text-base font-semibold">Deletion scheduled</div>
+          <p className="text-sm text-neutral-300">Your account will be permanently deleted on <span className="font-semibold text-white">{when}</span>.</p>
+          <p className="text-sm text-neutral-500">Changed your mind? Just log back in before then and the deletion is cancelled.</p>
+        </div>
+        <div className="mt-5">
+          <PrimaryButton onClick={onSignOut}>Sign out</PrimaryButton>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <BackHeader title="Delete account" onBack={onBack} />
+
+      <div className="bg-neutral-950 border border-red-500/30 rounded-2xl p-5 space-y-3 mb-5">
+        <div className="text-base font-semibold">Before you delete</div>
+        <ul className="text-sm text-neutral-400 space-y-2 list-disc pl-5">
+          <li>Your account is deleted after <span className="text-white">14 days</span>. Log back in during that time to cancel.</li>
+          <li>Your name, NIN, saved bank accounts and username are erased, your payment links are closed, and you can never log in again.</li>
+          <li>Transaction records are kept anonymously, as financial regulations require.</li>
+          <li>You can't delete while you have a wallet balance, referral earnings, or a withdrawal or payment in progress.</li>
+        </ul>
+      </div>
+
+      {!hasPin ? (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-3">
+          <p className="text-sm text-neutral-300">To delete your account you need a transaction PIN to confirm it's you.</p>
+          <PrimaryButton onClick={onSetPin}>Set up PIN</PrimaryButton>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="space-y-4">
+          <Field label="Transaction PIN" type="password" inputMode="numeric" value={pin} onChange={e => { setError(''); setPin(e.target.value.replace(/\D/g, '').slice(0, 6)); }} placeholder="••••" />
+          <Field label="Type DELETE to confirm" value={confirmText} onChange={e => { setError(''); setConfirmText(e.target.value); }} placeholder="DELETE" autoCapitalize="characters" autoComplete="off" />
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          {blockers.length > 0 && (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+              <div className="text-sm font-semibold mb-2">You can't delete your account yet</div>
+              <ul className="text-sm text-neutral-400 space-y-1 list-disc pl-5">
+                {blockers.map(b => <li key={b}>{DELETE_BLOCKER_TEXT[b] || 'Something is still in progress on your account.'}</li>)}
+              </ul>
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="w-full rounded-2xl py-4 font-semibold bg-red-500 text-white disabled:opacity-40 flex items-center justify-center"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Delete my account'}
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -6503,11 +6620,10 @@ function PaymentNoticesPanel({ rates, onChanged, view = 'queue' }) {
   );
 }
 
-function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenUsername, onOpenSecurity, onOpenSettings, onOpenAccountDetails, onOpenAddToHomeScreen, userId, pushEnabled, onPushChange }) {
+function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenSecurity, onOpenSettings, onOpenAccountDetails, onOpenAddToHomeScreen, userId, pushEnabled, onPushChange }) {
   const [showVerification, setShowVerification] = useState(false);
   const items = [
-    { label: 'Account details', icon: UserCircle, onClick: onOpenAccountDetails },
-    { label: 'Username', icon: User, onClick: onOpenUsername },
+    { label: 'My profile', icon: UserCircle, onClick: onOpenAccountDetails },
     { label: 'Rates', icon: LineChart, onClick: onOpenRates },
     { label: 'Verification', icon: ShieldCheck, onClick: () => setShowVerification(true) },
     { label: 'Security', icon: Lock, onClick: onOpenSecurity },
@@ -7066,7 +7182,6 @@ function MobileAppRoot() {
           onLogout={handleLogout}
           onOpenRates={() => setProfileView('rates')}
           onOpenSupport={() => setProfileView('support')}
-          onOpenUsername={() => setProfileView('username')}
           onOpenSecurity={() => setProfileView('security')}
           onOpenSettings={() => setProfileView('settings')}
           onOpenAccountDetails={() => setProfileView('account')}
@@ -7080,10 +7195,11 @@ function MobileAppRoot() {
         <RatesScreen onBack={() => setProfileView('main')} />
       )}
       {tab === 'profile' && profileView === 'support' && <SupportScreen onBack={() => setProfileView('main')} />}
-      {tab === 'profile' && profileView === 'account' && <AccountDetailsScreen onBack={() => setProfileView('main')} profile={profile} onUpdated={() => { if (profile?.id) loadUserData(profile.id); }} />}
+      {tab === 'profile' && profileView === 'account' && <AccountDetailsScreen onBack={() => setProfileView('main')} profile={profile} onUpdated={() => { if (profile?.id) loadUserData(profile.id); }} onOpenUsername={() => setProfileView('username')} onDeleteAccount={() => setProfileView('deleteAccount')} />}
+      {tab === 'profile' && profileView === 'deleteAccount' && <DeleteAccountScreen hasPin={profile?.has_pin === true} onBack={() => setProfileView('account')} onSetPin={() => setProfileView('security')} onSignOut={handleLogout} />}
       {tab === 'profile' && profileView === 'username' && (
         <UsernameScreen
-          onBack={() => setProfileView('main')}
+          onBack={() => setProfileView('account')}
           currentUsername={profile?.username || ''}
           onChanged={() => { if (profile?.id) loadUserData(profile.id); }}
         />
