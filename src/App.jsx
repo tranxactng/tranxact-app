@@ -2804,6 +2804,9 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
   const [pinLoading, setPinLoading] = useState(false);
 
   const [resolvedName, setResolvedName] = useState('');
+  // When the bank lookup can't answer, the person types the account name and the team checks it before sending.
+  const [lookupUnavailable, setLookupUnavailable] = useState(false);
+  const [typedName, setTypedName] = useState('');
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState('');
   useClearOnEdit(resolveError, setResolveError);
@@ -2818,19 +2821,25 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
   useEffect(() => {
     setResolvedName('');
     setResolveError('');
+    setLookupUnavailable(false);
     if (accountNumber.length !== 10 || !bankCode) return;
     let cancelled = false;
     setResolving(true);
     resolveBankAccount(accountNumber, bankCode)
-      .then(res => { if (!cancelled) setResolvedName(res.account_name); })
+      .then(res => {
+        if (cancelled) return;
+        if (res && res.account_name) setResolvedName(res.account_name);
+        else setLookupUnavailable(true);
+      })
       .catch(e => { if (!cancelled) setResolveError(e.message); })
       .finally(() => { if (!cancelled) setResolving(false); });
     return () => { cancelled = true; };
   }, [accountNumber, bankCode]);
 
   const selectedBank = (banks || []).find(b => b.code === bankCode);
-  const recipientLabel = mode === 'user' ? `@${username}` : `${resolvedName || accountNumber}${selectedBank ? ' · ' + selectedBank.name : ''}`;
-  const canReview = mode === 'user' ? (username && amount) : (accountNumber.length === 10 && amount && resolvedName && !resolving);
+  const accountName = resolvedName || (lookupUnavailable ? typedName.trim().replace(/\s+/g, ' ') : '');
+  const recipientLabel = mode === 'user' ? `@${username}` : `${accountName || accountNumber}${selectedBank ? ' · ' + selectedBank.name : ''}`;
+  const canReview = mode === 'user' ? (username && amount) : (accountNumber.length === 10 && amount && accountName.length >= 3 && !resolving);
 
   const executeSend = async () => {
     setError('');
@@ -2842,7 +2851,8 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
           bank_name: selectedBank?.name || '',
           bank_code: bankCode,
           account_number: accountNumber,
-          account_name: resolvedName,
+          account_name: accountName,
+          name_verified: Boolean(resolvedName),
         });
       } else {
         await sendToUser(username, Number(amount));
@@ -2909,8 +2919,8 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
 
         <SuccessSheet
           open
-          title="Success!"
-          subtitle={mode === 'bank' ? 'Transfer processed' : 'Sent instantly'}
+          title={mode === 'bank' ? 'Transfer on its way' : 'Success!'}
+          subtitle={mode === 'bank' ? "It should land in a few minutes. We'll notify you the moment it's sent." : 'Sent instantly'}
           amount={fmtNaira(Number(amount) || 0)}
           detail={`to ${recipientLabel}`}
           onDone={onDone}
@@ -3003,8 +3013,14 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
             </div>
             <Field label="Account number" value={accountNumber} onChange={e => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="0123456789" />
             {resolving && <div className="text-sm text-neutral-500 -mt-2 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying account…</div>}
-            {resolvedName && <div className="text-sm text-emerald-400 -mt-2">{resolvedName}</div>}
+            {resolvedName && <div className="text-sm text-emerald-400 -mt-2" data-resolved-name>{resolvedName}</div>}
             {resolveError && <div className="text-sm text-red-400 -mt-2">{resolveError}</div>}
+            {lookupUnavailable && !resolvedName && (
+              <div data-typed-name>
+                <Field label="Name on the account" value={typedName} onChange={e => setTypedName(e.target.value.slice(0, 80))} placeholder="As it appears at the bank" autoCapitalize="words" />
+                <p className="text-[11px] text-neutral-500 mt-1.5">We couldn't confirm this account automatically. Type the name exactly as it is at the bank, and we'll check it before sending.</p>
+              </div>
+            )}
           </>
         )}
         <MoneyField label="Amount" value={amount} onValue={setAmount} placeholder="0.00" />
@@ -4041,6 +4057,7 @@ function AdminScreen({ onRefresh }) {
   const [pendingNotices, setPendingNotices] = useState(null);
   const [stats, setStats] = useState(null);
   const [pendingWithdrawals, setPendingWithdrawals] = useState(null);
+  const [copiedWithdrawal, setCopiedWithdrawal] = useState(null);
   const [withdrawalActionLoading, setWithdrawalActionLoading] = useState(null);
   const [salesLeads, setSalesLeads] = useState(null);
   const [leadActionLoading, setLeadActionLoading] = useState(null);
@@ -4853,20 +4870,31 @@ function AdminScreen({ onRefresh }) {
                   <span className="text-sm font-medium">@{w.username}</span>
                   <span className="font-mono text-sm">{fmtNaira(w.amount)}</span>
                 </div>
-                <div className="text-xs text-neutral-500 mb-3">{w.bank_name} · {w.account_number} · {w.account_name}</div>
+                <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-2 text-sm space-y-1">
+                  <div className="font-mono text-base tracking-wide">{w.account_number}</div>
+                  <div className="text-neutral-300">{w.account_name}</div>
+                  <div className="text-neutral-500 text-xs">{w.bank_name}</div>
+                </div>
+                {w.name_verified === false && <p className="text-[11px] text-amber-400 mb-2">Name typed by the user, not looked up. Check it matches in your bank app before sending.</p>}
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[11px] text-neutral-600">{w.created_at ? new Date(normalizeTimestamp(w.created_at)).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' }) : ''}</span>
+                  <button type="button" data-copy-withdrawal onClick={() => { navigator.clipboard?.writeText(`${w.account_number}\n${w.bank_name}\n${w.account_name}\n${Number(w.amount)}`); setCopiedWithdrawal(w.id); setTimeout(() => setCopiedWithdrawal(null), 1500); }} className="text-xs text-violet-400 flex items-center gap-1">
+                    {copiedWithdrawal === w.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copiedWithdrawal === w.id ? 'Copied' : 'Copy details'}
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <GhostButton onClick={() => handleRejectWithdrawal(w.id)} disabled={withdrawalActionLoading === w.id}>
-                    {withdrawalActionLoading === w.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reject'}
+                  <GhostButton onClick={() => { if (window.confirm(`Cancel this transfer and return ${fmtNaira(w.amount)} (plus the fee) to @${w.username}?`)) handleRejectWithdrawal(w.id); }} disabled={withdrawalActionLoading === w.id}>
+                    {withdrawalActionLoading === w.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Cancel & refund'}
                   </GhostButton>
                   <button
                     onClick={() => handleApproveWithdrawal(w.id)}
                     disabled={withdrawalActionLoading === w.id}
                     className="bg-emerald-500 text-black font-semibold rounded-xl py-3 text-sm hover:bg-emerald-400 transition disabled:opacity-50 flex items-center justify-center"
                   >
-                    {withdrawalActionLoading === w.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Mark Paid'}
+                    {withdrawalActionLoading === w.id ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm sent'}
                   </button>
                 </div>
-                <p className="text-[10px] text-neutral-600 mt-2">Approve only after you've actually sent this transfer.</p>
+                <p className="text-[10px] text-neutral-600 mt-2">Tap Confirm sent only after the money has left your bank app. They're notified straight away.</p>
               </div>
             ))}
           </div>
