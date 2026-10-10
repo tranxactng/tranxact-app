@@ -6504,7 +6504,7 @@ function writePushFlag(on) { try { localStorage.setItem('tranxactPushOn', on ? '
 // ---------- First open: brand welcome + three feature screens (shown before sign-up) ----------
 const INTRO_FONT = '-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif';
 const INTRO_STEPS = [
-  { title: 'Welcome to Tranxact', body: 'Receive crypto, send to any bank and get paid with a link. All in naira.' },
+  { title: 'Welcome to Tranxact', body: 'Receive crypto. Get naira. Send. Pay bills. Get paid.' },
   { title: 'Receive crypto. Get naira.', body: 'Your own wallet addresses for BTC, ETH, USDT and more. What you receive is reflected in naira.' },
   { title: 'Send money, simply.', body: 'Send naira straight to any Nigerian bank account.' },
   { title: 'Get paid with a link.', body: 'Create a payment or tip link and share it anywhere.' },
@@ -6548,17 +6548,22 @@ function IntroDots({ ring = [], dot = [] }) {
 function IntroArt({ step }) {
   const svgStyle = { width: '100%', height: '100%', maxWidth: 320, maxHeight: 300, display: 'block', position: 'relative' };
   if (step === 0) return (
+    // Same story as the brand banner: crypto comes in, becomes naira, and you get paid with a link.
     <svg viewBox="0 0 320 300" style={svgStyle} aria-hidden="true" data-intro-art="welcome">
       <IntroDefs />
-      <IntroDots ring={[[40, 70, 4], [292, 220, 5]]} dot={[[270, 40], [70, 262]]} />
-      <g opacity=".7"><IntroCoin x={232} y={34} size={62} glyph="Ξ" glyphSize={27} dim /></g>
-      <g opacity=".7"><IntroCoin x={22} y={176} size={58} glyph="$" glyphSize={25} dim /></g>
-      <IntroCoin x={38} y={44} size={84} glyph="₿" glyphSize={38} />
-      <IntroCoin x={226} y={150} size={76} glyph="₮" glyphSize={34} />
-      <NairaTile x={128} y={222} size={64} />
-      <circle cx="160" cy="140" r="62" fill="#000" stroke="#404040" strokeWidth="1.5" />
-      <circle cx="160" cy="140" r="52" fill="none" stroke="#262626" strokeWidth="1.5" />
-      <image href={`data:image/png;base64,${LOGO_B64}`} x="128" y="118" width="64" height="44" />
+      <IntroDots ring={[[302, 150, 6], [70, 270, 5], [186, 200, 4]]} dot={[[150, 104], [306, 206], [30, 30]]} />
+      <path d="M 112 58 C 140 18, 186 18, 204 52" fill="none" stroke="#fff" strokeWidth="9" strokeLinecap="round" markerEnd="url(#txHeadW)" />
+      <path d="M 252 138 C 264 158, 262 174, 254 190" fill="none" stroke="#fff" strokeWidth="9" strokeLinecap="round" markerEnd="url(#txHeadW)" />
+      <IntroCoin x={18} y={44} size={96} glyph="₿" glyphSize={42} />
+      <IntroCoin x={104} y={122} size={64} glyph="Ξ" glyphSize={27} />
+      <IntroCoin x={26} y={160} size={66} glyph="₮" glyphSize={28} />
+      <g transform="rotate(-5 252 86)"><NairaTile x={206} y={40} size={92} /></g>
+      <g transform="rotate(5 252 240)">
+        <rect x="210" y="200" width="84" height="84" rx="22" fill="#fff" />
+        <g transform="translate(228 218)" fill="none" stroke="#000" strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round"><path d="M20 28a12 12 0 0 0 17 0l7-7a12 12 0 0 0-17-17l-2 2" /><path d="M28 20a12 12 0 0 0-17 0l-7 7a12 12 0 0 0 17 17l2-2" /></g>
+      </g>
+      <rect x="104" y="232" width="92" height="28" rx="14" fill="#1c1c1c" stroke="#2e2e2e" />
+      <text x="150" y="251" textAnchor="middle" fontSize="11.5" fontWeight="700" letterSpacing="1.6" fill="#fff" fontFamily="ui-monospace,SFMono-Regular,Menlo,monospace">GET PAID</text>
     </svg>
   );
   if (step === 1) return (
@@ -6619,12 +6624,14 @@ function IntroScreens({ onSignup, onLogin }) {
           )}
         </div>
         <div style={{ flex: '1 1 auto', minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: '8px 0' }}>
-          <div aria-hidden="true" style={{ position: 'absolute', width: 300, height: 300, maxWidth: '95%', maxHeight: '100%', borderRadius: '50%', pointerEvents: 'none', background: 'radial-gradient(closest-side, rgba(139,92,246,.16), rgba(139,92,246,0))' }} />
+          <div aria-hidden="true" style={step === 0
+            ? { position: 'absolute', inset: '-40px -24px 0', pointerEvents: 'none', background: 'radial-gradient(circle at 74% 34%, rgba(139,92,246,.30), rgba(139,92,246,0) 46%)' }
+            : { position: 'absolute', width: 300, height: 300, maxWidth: '95%', maxHeight: '100%', borderRadius: '50%', pointerEvents: 'none', background: 'radial-gradient(closest-side, rgba(139,92,246,.16), rgba(139,92,246,0))' }} />
           <IntroArt step={step} />
         </div>
         <div style={{ textAlign: 'center', flex: 'none' }}>
           <h1 className="font-bold" style={{ fontSize: step === 0 ? 30 : 28, letterSpacing: '-.025em', lineHeight: 1.12, textWrap: 'balance' }}>{s.title}</h1>
-          <p className="text-neutral-400 mx-auto" style={{ marginTop: 10, fontSize: 15, lineHeight: 1.5, maxWidth: '30ch' }}>{s.body}</p>
+          <p className="text-neutral-400 mx-auto" style={{ marginTop: 10, fontSize: 15, lineHeight: 1.5, maxWidth: step === 0 ? '24ch' : '30ch', textWrap: 'balance' }}>{s.body}</p>
         </div>
         {step === 0 ? (
           <div style={{ marginTop: 30, flex: 'none' }}>
