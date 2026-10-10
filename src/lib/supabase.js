@@ -23,6 +23,13 @@ export async function signUp({ email, password, username, fullName, referralCode
 
 export async function signIn({ email, password }) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  // Logging back in during the 14-day grace period cancels a pending account deletion.
+  if (!error && data?.session) {
+    try {
+      const { data: c } = await supabase.rpc('cancel_account_deletion');
+      if (c?.cancelled) sendAccountDeletionEmail('account_deletion_cancelled', data.session.access_token);
+    } catch { /* never block sign-in */ }
+  }
   return { data, error };
 }
 
@@ -502,6 +509,31 @@ export async function setTransactionPin(pin) {
   const { error } = await supabase.rpc('set_transaction_pin', { p_pin: pin });
   if (error) throw new Error(error.message);
   return true;
+}
+
+// Starts the 14-day account deletion grace period. Needs the transaction PIN.
+// Resolves to { ok, scheduled_for } or { ok:false, error: 'wrong_pin' | 'blocked' | 'pin_required' | ..., blockers? }.
+export async function requestAccountDeletion(pin) {
+  const { data, error } = await supabase.rpc('request_account_deletion', { p_pin: pin });
+  if (error) throw new Error(error.message);
+  if (data?.ok && !data.already) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) sendAccountDeletionEmail('account_deletion_scheduled', session.access_token);
+  }
+  return data;
+}
+
+// Best-effort confirmation emails for account deletion. The server only ever sends them to the
+// signed-in user's own address, with the date/name read from the database (not from here), and
+// only right after the real event, so nothing in this call can be abused. Never blocks the flow.
+async function sendAccountDeletionEmail(type, accessToken) {
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ type }),
+    });
+  } catch { /* email is best-effort */ }
 }
 
 // Changing an existing PIN requires the current PIN (server enforces a lockout
