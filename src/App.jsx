@@ -5,7 +5,7 @@ import {
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
   UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar, Search,
-  RefreshCw, Receipt, PiggyBank, Headphones, BadgeCheck, Gauge, ChevronDown, Info, Gift, Delete, ScanFace, Fingerprint,
+  RefreshCw, WifiOff, Receipt, PiggyBank, Headphones, BadgeCheck, Gauge, ChevronDown, Info, Gift, Delete, ScanFace, Fingerprint,
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -7863,6 +7863,60 @@ function LeaderboardScreen({ onBack }) {
   );
 }
 
+// ---------- Pull to refresh + offline banner ----------
+// Drag down from the very top of a main screen to reload balance, history and notifications.
+// The app also refreshes on its own: when it's reopened, when the network comes back,
+// the moment the balance changes on the server, and every minute while it's open.
+const PTR_TRIGGER = 70;
+function PullToRefresh({ enabled, online, onRefresh, children }) {
+  const [pull, setPull] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const startY = useRef(null);
+
+  const onStart = (e) => {
+    if (!enabled || busy || window.scrollY > 0) { startY.current = null; return; }
+    startY.current = e.touches[0].clientY;
+  };
+  const onMove = (e) => {
+    if (startY.current === null) return;
+    const dy = e.touches[0].clientY - startY.current;
+    if (dy <= 0 || window.scrollY > 0) { setPull(0); return; }
+    setPull(Math.min(110, dy * 0.5)); // resistance, so it feels like a native pull
+  };
+  const onEnd = async () => {
+    if (startY.current === null) return;
+    startY.current = null;
+    if (pull >= PTR_TRIGGER && online) {
+      setBusy(true);
+      setPull(56);
+      try { await onRefresh(); } catch { /* keep showing last data */ }
+      setBusy(false);
+    }
+    setPull(0);
+  };
+
+  const ready = pull >= PTR_TRIGGER;
+  return (
+    <div onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} onTouchCancel={onEnd}>
+      {!online && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200">
+          <WifiOff className="w-4 h-4 flex-shrink-0" />
+          <span>You're offline. Showing your last saved balance — it'll update as soon as you're back online.</span>
+        </div>
+      )}
+      <div className="flex justify-center overflow-hidden transition-[height] duration-200 ease-out" style={{ height: pull }} aria-hidden={pull === 0}>
+        <div className="self-end mb-2 flex items-center gap-2 text-xs text-neutral-400">
+          {busy
+            ? <Loader2 className="w-4 h-4 animate-spin text-[#8B5CF6]" />
+            : <RefreshCw className="w-4 h-4 transition-transform" style={{ transform: `rotate(${pull * 3}deg)`, color: ready ? '#8B5CF6' : undefined }} />}
+          <span>{busy ? 'Refreshing…' : !online ? "You're offline" : ready ? 'Release to refresh' : 'Pull to refresh'}</span>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ---------- App shell (nav) ----------
 function AppShell({ tab, setTab, isAdmin = false, children }) {
   const navItems = isAdmin ? [...NAV, { key: 'admin', label: 'Admin', icon: ShieldCheck }] : NAV;
@@ -8214,6 +8268,79 @@ function MobileAppRoot() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
+  // ---- Keeping the balance fresh without closing and reopening the app ----
+  const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine !== false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const lastRefreshRef = useRef(0);
+  const refreshingRef = useRef(null);
+  const refreshNow = React.useCallback(async ({ force = false, remount = false } = {}) => {
+    const uid = profile?.id;
+    if (!uid) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (!force && Date.now() - lastRefreshRef.current < 10000) return; // don't hammer the server
+    if (refreshingRef.current) return refreshingRef.current;
+    refreshingRef.current = (async () => {
+      try {
+        await loadUserData(uid);
+        lastRefreshRef.current = Date.now();
+        if (remount) setRefreshKey((k) => k + 1); // lets screens that load their own data (Earn, Crypto…) reload too
+      } finally { refreshingRef.current = null; }
+    })();
+    return refreshingRef.current;
+  }, [profile?.id]);
+
+  // Back online → show it and reload. Gone offline → show the banner.
+  useEffect(() => {
+    const goOnline = () => { setOnline(true); refreshNow({ force: true }); };
+    const goOffline = () => setOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, [refreshNow]);
+
+  // Coming back to the app (from another app, the lock screen, recents) → reload.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshNow(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    window.addEventListener('pageshow', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      window.removeEventListener('pageshow', onVisible);
+    };
+  }, [refreshNow]);
+
+  // Live: the moment the wallet changes or a notification lands, update without any tap.
+  useEffect(() => {
+    const uid = profile?.id;
+    if (!uid) return;
+    const ch = supabase
+      .channel(`live-${uid}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'wallets', filter: `user_id=eq.${uid}` }, (payload) => {
+        if (payload?.new) setWallet((w) => ({ ...(w || {}), ...payload.new }));
+        refreshNow({ force: true });
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, () => {
+        refreshNow({ force: true });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [profile?.id, refreshNow]);
+
+  // Our own pull-to-refresh replaces the browser's (which would reload the whole app).
+  useEffect(() => {
+    const prev = document.body.style.overscrollBehaviorY;
+    document.body.style.overscrollBehaviorY = 'contain';
+    return () => { document.body.style.overscrollBehaviorY = prev; };
+  }, []);
+
+  // Safety net: every 60s while the app is open and on screen.
+  useEffect(() => {
+    const t = setInterval(() => { if (document.visibilityState === 'visible') refreshNow(); }, 60000);
+    return () => clearInterval(t);
+  }, [refreshNow]);
+
   const handleLogout = async () => {
     await signOut();
     setLocked(false);
@@ -8279,6 +8406,12 @@ function MobileAppRoot() {
 
   return (
     <AppShell tab={tab === 'earn' ? earnFrom : tab} setTab={(t) => { setTab(t); setEarnFrom('home'); setHomeView('main'); setProfileView('main'); setEarnView('main'); }} isAdmin={profile?.is_admin === true}>
+      <PullToRefresh
+        online={online}
+        enabled={(tab === 'home' && homeView === 'main') || tab === 'earn' || tab === 'crypto' || tab === 'cards' || (tab === 'profile' && profileView === 'main')}
+        onRefresh={() => refreshNow({ force: true, remount: tab !== 'home' })}
+      >
+      <React.Fragment key={tab === 'home' ? 'home' : `${tab}-${refreshKey}`}>
       {tab === 'home' && homeView === 'main' && (
         <HomeScreen
           balanceVisible={balanceVisible}
@@ -8448,6 +8581,8 @@ function MobileAppRoot() {
           onClose={() => { setShowVerification(false); loadUserData(profile.id); }}
         />
       )}
+      </React.Fragment>
+      </PullToRefresh>
     </AppShell>
   );
 }
