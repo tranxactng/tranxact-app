@@ -162,6 +162,38 @@ const NAV = [
 const CRYPTO_FUNDING_FEE_PCT = 0.9;
 const NAIRA_FUNDING_FEE_FLAT = 100;
 
+// Live referral / bonus / cashback numbers, read from the same settings the server uses,
+// so the Earn page never promises something different from what's actually paid.
+const PUBLIC_SETTINGS_DEFAULTS = { referral_pct_of_crypto_fee: 15, first_deposit_bonus_ngn: 1000, first_deposit_bonus_min_usd: 100, cashback_bills_pct: 0 };
+let publicSettingsCache = null;
+function usePublicSettings() {
+  const [settings, setSettings] = useState(publicSettingsCache || PUBLIC_SETTINGS_DEFAULTS);
+  useEffect(() => {
+    if (publicSettingsCache) return;
+    supabase.rpc('get_public_settings').then(({ data }) => {
+      const row = data?.[0];
+      if (!row) return;
+      const merged = { ...PUBLIC_SETTINGS_DEFAULTS };
+      Object.keys(merged).forEach(k => { const v = Number(row[k]); if (row[k] !== null && Number.isFinite(v)) merged[k] = v; });
+      publicSettingsCache = merged;
+      setSettings(merged);
+    });
+  }, []);
+  return settings;
+}
+function ReferralRuleText() {
+  const s = usePublicSettings();
+  const bonus = s.first_deposit_bonus_ngn > 0
+    ? `, and they get ₦${s.first_deposit_bonus_ngn.toLocaleString()} on their first deposit of $${s.first_deposit_bonus_min_usd.toLocaleString()} or more`
+    : '';
+  return <>earn {s.referral_pct_of_crypto_fee}% of the crypto funding fee every time someone you referred receives crypto{bonus}.</>;
+}
+// Renders its child only while bill cashback is switched on (cashback_bills_pct > 0).
+function CashbackRule({ children }) {
+  const s = usePublicSettings();
+  return s.cashback_bills_pct > 0 ? children(s.cashback_bills_pct) : null;
+}
+
 const fmtNaira = (n) =>
   `₦${Math.abs(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -7284,7 +7316,7 @@ function ProfileScreen({ profile, onOpenEarn, onLogout, onOpenRates, onOpenSuppo
         <div className="w-10 h-10 rounded-full bg-[#8B5CF6] flex items-center justify-center flex-shrink-0"><Gift className="w-5 h-5 text-white" /></div>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-white">Earn with Tranxact</div>
-          <div className="text-xs text-neutral-400">Invite friends and earn cashback</div>
+          <div className="text-xs text-neutral-400">Invite friends and earn rewards</div>
         </div>
         <ChevronRight className="w-4 h-4 text-neutral-400" />
       </button>
@@ -7596,7 +7628,7 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId, onWithdrawn }
       <h1 className="text-xl font-bold mb-1">Earn</h1>
       <p className="text-sm text-neutral-500 mb-5">Every way Tranxact pays you back.</p>
 
-      {/* The real, combined headline number — referrals and cashback, one
+      {/* The real, combined headline number — referrals (and cashback when it's on), one
           balance — with withdraw right here at the first place it's shown,
           rather than making people tap through to move their own money. */}
       <div
@@ -7615,10 +7647,12 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId, onWithdrawn }
               <span className="w-2 h-2 rounded-full bg-violet-400" />
               <span className="text-neutral-400">Referrals <span className="text-white font-mono">{fmtNaira(breakdown.referral)}</span></span>
             </div>
+            {breakdown.cashback > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-teal-400" />
               <span className="text-neutral-400">Cashback <span className="text-white font-mono">{fmtNaira(breakdown.cashback)}</span></span>
             </div>
+            )}
           </div>
         )}
         {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
@@ -7679,15 +7713,17 @@ function EarnScreen({ onEarnings, onLeaderboard, username, userId, onWithdrawn }
         <div className="flex items-start gap-3 px-1">
           <div className="w-8 h-8 rounded-full bg-violet-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Users className="w-3.5 h-3.5 text-violet-400" /></div>
           <p className="text-xs text-neutral-500 leading-relaxed">
-            <span className="text-neutral-300 font-medium">Referrals:</span> earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
+            <span className="text-neutral-300 font-medium">Referrals:</span> <ReferralRuleText />
           </p>
         </div>
+        <CashbackRule>{pct => (
         <div className="flex items-start gap-3 px-1">
           <div className="w-8 h-8 rounded-full bg-teal-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Sparkles className="w-3.5 h-3.5 text-teal-400" /></div>
           <p className="text-xs text-neutral-500 leading-relaxed">
-            <span className="text-neutral-300 font-medium">Cashback:</span> earn 1% back on every airtime, data, electricity, or TV bill you pay for through Tranxact.
+            <span className="text-neutral-300 font-medium">Cashback:</span> earn {pct}% back on every airtime, data, electricity, or TV bill you pay for through Tranxact.
           </p>
         </div>
+        )}</CashbackRule>
       </div>
     </div>
   );
@@ -7708,11 +7744,13 @@ function ReferralEarningsScreen({ onBack, userId }) {
       <h2 className="text-sm font-semibold mb-2">How it works</h2>
       <div className="space-y-2.5 mb-6">
         <p className="text-xs text-neutral-500">
-          <span className="text-neutral-300 font-medium">Referrals:</span> earn 25% of the crypto funding fee every time someone you referred receives crypto, and they get ₦1,000 on their first deposit of $25 or more.
+          <span className="text-neutral-300 font-medium">Referrals:</span> <ReferralRuleText />
         </p>
+        <CashbackRule>{pct => (
         <p className="text-xs text-neutral-500">
-          <span className="text-neutral-300 font-medium">Cashback:</span> earn 1% back on every airtime, data, electricity, or TV bill you pay for.
+          <span className="text-neutral-300 font-medium">Cashback:</span> earn {pct}% back on every airtime, data, electricity, or TV bill you pay for.
         </p>
+        )}</CashbackRule>
         <p className="text-xs text-neutral-600">Withdraw anytime from the Earn tab.</p>
       </div>
 
