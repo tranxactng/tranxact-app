@@ -1255,10 +1255,6 @@ const RECEIPT_STATUS = {
   failed: { label: 'Failed', dot: '#F87171' }, reversed: { label: 'Reversed', dot: '#F87171' },
 };
 const fmtCryptoAmt = (n, sym) => `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 })} ${sym || ''}`.trim();
-const firstNameLastInitial = (name) => {
-  const p = String(name || '').trim().split(/\s+/).filter(Boolean);
-  return p.length > 1 ? `${p[0]} ${p[p.length - 1][0].toUpperCase()}.` : (p[0] || '');
-};
 
 function buildReceipt(tx, d) {
   const type = d?.type || tx.type;
@@ -1277,8 +1273,7 @@ function buildReceipt(tx, d) {
   if (type === 'crypto_deposit') { headline = 'You received'; sub = cryptoLine; }
   else if (type === 'tranxactpay') {
     headline = d?.is_tip ? 'You got tipped' : 'You got paid';
-    const who = d?.payer_name ? firstNameLastInitial(d.payer_name) : null;
-    sub = [d?.is_tip ? null : (d?.link_title || null), who ? `by ${who}` : null].filter(Boolean).join(' · ') || null;
+    sub = d?.is_tip ? null : (d?.link_title || null);
   } else if (type === 'fund_bank') { headline = 'You received'; sub = 'Bank transfer'; }
   else if ((type === 'withdrawal' || type === 'send_bank') && d?.bank_account_name) {
     headline = 'Sent to bank';
@@ -1289,7 +1284,9 @@ function buildReceipt(tx, d) {
   }
 
   const reference = d?.reference || (tx.id ? `TRX-${tx.id.replace(/-/g, '').slice(0, 10).toUpperCase()}` : '');
-  return { type, status, amount, date, asset, headline, sub, reference };
+  // Who paid: the name they typed on the checkout page (payment links and tips).
+  const payer = type === 'tranxactpay' && d?.payer_name ? String(d.payer_name).trim() : null;
+  return { type, status, amount, date, asset, headline, sub, reference, payer };
 }
 
 // The visual itself, shared by the detail sheet and the shareable image.
@@ -1323,6 +1320,12 @@ function ReceiptFace({ tx, r, onCopyRef, copied }) {
       </div>
 
       <div className="relative space-y-3 text-[13px]">
+        {r.payer && (
+          <div className="flex justify-between gap-4">
+            <span className="text-neutral-500 flex-shrink-0">From</span>
+            <span className="text-white text-right truncate">{r.payer}</span>
+          </div>
+        )}
         <div className="flex justify-between">
           <span className="text-neutral-500">Status</span>
           <span className="flex items-center gap-1.5 text-white"><span className="w-1.5 h-1.5 rounded-full" style={{ background: r.status.dot }} />{r.status.label}</span>
@@ -3951,7 +3954,7 @@ function ProfilePhoto({ size = 80 }) {
   return (
     <img
       src="/avatar.jpg" alt="" width={size} height={size}
-      className="rounded-full object-cover border border-neutral-800 bg-neutral-900 flex-shrink-0"
+      className="rounded-full object-cover bg-[#0d0920] flex-shrink-0"
       style={{ width: size, height: size }}
     />
   );
