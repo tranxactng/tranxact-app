@@ -5,7 +5,7 @@ import {
   Trophy, Home, LineChart, Bitcoin, CreditCard, User, ChevronLeft, ChevronRight, Copy, Share2,
   Check, X, QrCode, Plus, Lock, Mail, ArrowLeft, LogOut, ShieldCheck, Settings, Wallet, ArrowRight,
   UserCircle, Users, Landmark, Loader2, Sparkles, BarChart3, Image as ImageIcon, FileText, ShoppingBag, Calendar, Search,
-  RefreshCw, Receipt, PiggyBank,
+  RefreshCw, Receipt, PiggyBank, Headphones, BadgeCheck, Gauge, ChevronDown, Info, Gift, Delete, ScanFace, Fingerprint,
 } from 'lucide-react';
 import {
   supabase, signUp, signIn, requestPasswordReset, signOut,
@@ -21,12 +21,13 @@ import {
   requestWithdrawal, notifyCopyEvent,
   listPaystackBanks, resolveBankAccount,
   getMyNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead,
-  getKycInfo, submitNin, revealNin, adminSendCustomEmail, adminBroadcastEmail
+  getKycInfo, submitNin, revealNin, adminSendCustomEmail, adminBroadcastEmail, getTransactionReceipt, getMyLimits,
+  getLoginPinStatus, setLoginPin, verifyLoginPin, clearLoginPin, faceIdSupported, faceIdCredentialOnThisDevice, registerFaceId, unlockWithFaceId, turnOffFaceId
 } from './lib/supabase.js';
 
-// Supabase emails an 8-digit code for signup and password reset (Authentication ->
+// Supabase emails a 6-digit code for signup and password reset (Authentication ->
 // Providers -> Email -> "Email OTP Length"). If you change that setting, change this to match.
-const AUTH_CODE_LENGTH = 8;
+const AUTH_CODE_LENGTH = 6;
 
 // While someone resets their password, verifying the emailed code signs them in.
 // The auth listener waits until the new password is saved instead of jumping to home.
@@ -158,7 +159,7 @@ const NAV = [
 // Mirrors fee_settings in the database, for preview purposes only — the actual
 // fee applied always comes from the server, this is just so the admin sees an
 // accurate preview before submitting.
-const CRYPTO_FUNDING_FEE_PCT = 0.7;
+const CRYPTO_FUNDING_FEE_PCT = 0.9;
 const NAIRA_FUNDING_FEE_FLAT = 100;
 
 const fmtNaira = (n) =>
@@ -816,12 +817,81 @@ function SignupCodeScreen({ email, onChangeEmail, isDashboard }) {
   );
 }
 
+// ---------- Passwords ----------
+// Same rules everywhere a password is chosen (signup, reset). Shown live as a checklist.
+const PASSWORD_RULES = [
+  { id: 'len', label: '8+ characters', test: (p) => p.length >= 8 },
+  { id: 'upper', label: '1 uppercase letter', test: (p) => /[A-Z]/.test(p) },
+  { id: 'num', label: '1 number', test: (p) => /\d/.test(p) },
+];
+const passwordOk = (p) => PASSWORD_RULES.every((r) => r.test(p));
+
+function PasswordRules({ password }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-2">
+      {PASSWORD_RULES.map((r) => {
+        const ok = r.test(password);
+        return (
+          <span key={r.id} className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border transition ${ok ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : 'border-neutral-800 text-neutral-500'}`}>
+            {ok ? <Check className="w-3 h-3" /> : <span className="w-1 h-1 rounded-full bg-neutral-600" />} {r.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function PasswordField({ label, value, onChange, placeholder = '••••••••', autoComplete = 'new-password', show, onToggle, invalid = false }) {
+  return (
+    <label className="block">
+      <span className="text-sm text-neutral-400 mb-2 block">{label}</span>
+      <div className={`flex items-center gap-3 bg-neutral-900 border rounded-xl px-4 py-3 focus-within:border-[#8B5CF6] transition ${invalid ? 'border-red-500/60' : 'border-neutral-800'}`}>
+        <Lock className="w-4 h-4 text-neutral-500 flex-shrink-0" />
+        <input
+          type={show ? 'text' : 'password'}
+          placeholder={placeholder}
+          autoComplete={autoComplete}
+          value={value}
+          onChange={onChange}
+          className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full"
+        />
+        <button type="button" onClick={onToggle} className="text-neutral-500 hover:text-white transition" aria-label={show ? 'Hide password' : 'Show password'}>
+          {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        </button>
+      </div>
+    </label>
+  );
+}
+
+// Nigerian mobile number → 10 digits after +234 (accepts 0803…, 803…, 234803…, +234 803…).
+const nationalDigits = (raw) => {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d.startsWith('234')) d = d.slice(3);
+  if (d.startsWith('0')) d = d.slice(1);
+  return d.slice(0, 10);
+};
+const phoneValid = (raw) => /^[789]\d{9}$/.test(nationalDigits(raw));
+
+function StepDots({ step, total = 2 }) {
+  return (
+    <div className="flex items-center gap-1.5 mb-6">
+      {Array.from({ length: total }).map((_, i) => (
+        <span key={i} className={`h-1 rounded-full transition-all ${i < step ? 'bg-[#8B5CF6] w-8' : 'bg-neutral-800 w-4'}`} />
+      ))}
+      <span className="text-xs text-neutral-500 ml-2">Step {step} of {total}</span>
+    </div>
+  );
+}
+
 function SignupScreen({ onSignup, onExistingAccount, goLogin, initialReferralCode, isDashboard }) {
+  const [step, setStep] = useState(1);
   const [showPw, setShowPw] = useState(false);
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [referralCode, setReferralCode] = useState(initialReferralCode || '');
   const [businessName, setBusinessName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -829,15 +899,41 @@ function SignupScreen({ onSignup, onExistingAccount, goLogin, initialReferralCod
   useClearOnEdit(error, setError);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
+  const cleanUsername = username.trim().toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_]/g, '');
+  const mismatch = confirm.length > 0 && confirm !== password;
+
+  const goStep2 = (e) => {
+    e.preventDefault();
+    setError('');
+    if (fullName.trim().split(/\s+/).length < 2) { setError('Enter your first and last name.'); return; }
+    if (cleanUsername.length < 3) { setError('Pick a username with at least 3 letters or numbers.'); return; }
+    if (!phoneValid(phone)) { setError('Enter a valid Nigerian phone number.'); return; }
+    setStep(2);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (!passwordOk(password)) { setError('Your password needs 8+ characters, an uppercase letter and a number.'); return; }
+    if (password !== confirm) { setError("The passwords don't match."); return; }
     setLoading(true);
-    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
     const cleanReferral = referralCode.trim().toLowerCase().replace(/^@/, '');
-    const { data, error: err } = await signUp({ email, password, username: cleanUsername, fullName, referralCode: cleanReferral || null, businessName: isDashboard ? (businessName.trim() || null) : null });
+    const { data, error: err } = await signUp({
+      email: email.trim(), password, username: cleanUsername, fullName: fullName.trim().replace(/\s+/g, ' '),
+      phone: `+234${nationalDigits(phone)}`, referralCode: cleanReferral || null,
+      businessName: isDashboard ? (businessName.trim() || null) : null,
+    });
     setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) {
+      // A taken username fails inside the database insert; send them back to step 1 to change it.
+      if (/database error|duplicate|already exists|unique/i.test(err.message)) {
+        setStep(1);
+        setError('That username is already taken. Try another one.');
+        return;
+      }
+      setError(err.message);
+      return;
+    }
     // When the email already has an account, Supabase reports success but returns no identities
     // (it hides whether the email exists). That is someone who started with a payment link, or who
     // forgot they signed up. Send them a code to set a password and sign in, instead of a dead end.
@@ -851,54 +947,103 @@ function SignupScreen({ onSignup, onExistingAccount, goLogin, initialReferralCod
   };
 
   if (needsConfirmation) {
-    return <SignupCodeScreen email={email.trim()} isDashboard={isDashboard} onChangeEmail={() => setNeedsConfirmation(false)} />;
+    return <SignupCodeScreen email={email.trim()} isDashboard={isDashboard} onChangeEmail={() => { setNeedsConfirmation(false); setStep(2); }} />;
+  }
+
+  const brand = isDashboard ? 'Tranxact Pay' : 'Tranxact';
+  const tagline = isDashboard ? 'Payment Dashboard' : undefined;
+
+  if (step === 1) {
+    return (
+      <AuthShell title="Create your account" subtitle="Tell us a little about you." brandLabel={brand} tagline={tagline}>
+        <StepDots step={1} />
+        <form className="space-y-4" onSubmit={goStep2}>
+          <Field label="Full name" icon={User} type="text" placeholder="First and last name" autoComplete="name" required value={fullName} onChange={e => setFullName(e.target.value)} />
+          <label className="block">
+            <span className="text-sm text-neutral-400 mb-2 block">Username</span>
+            <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-[#8B5CF6] transition">
+              <span className="text-neutral-500 text-sm">@</span>
+              <input
+                type="text" placeholder="yourname" autoCapitalize="none" autoCorrect="off" required
+                value={username} onChange={e => setUsername(e.target.value.replace(/\s/g, ''))}
+                className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full"
+              />
+            </div>
+            <span className="text-xs text-neutral-600 mt-1.5 block">People send you money with this.</span>
+          </label>
+          <label className="block">
+            <span className="text-sm text-neutral-400 mb-2 block">Phone number</span>
+            <div className="flex items-center bg-neutral-900 border border-neutral-800 rounded-xl focus-within:border-[#8B5CF6] transition overflow-hidden">
+              <span className="flex items-center gap-1.5 pl-4 pr-3 py-3 text-sm text-neutral-300 border-r border-neutral-800 whitespace-nowrap flex-shrink-0">🇳🇬 +234</span>
+              <input
+                type="tel" inputMode="numeric" autoComplete="tel-national" placeholder="803 000 0000" required
+                value={phone} onChange={e => setPhone(e.target.value.replace(/[^\d\s+]/g, '').slice(0, 16))}
+                className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full px-3 py-3"
+              />
+            </div>
+          </label>
+          <div>
+            {isDashboard ? (
+              <Field label="What are you accepting payments for?" icon={Landmark} type="text" placeholder="e.g. event tickets, consulting, product sales" value={businessName} onChange={e => setBusinessName(e.target.value)} />
+            ) : (
+              <Field label="Referral code (optional)" icon={Users} type="text" placeholder="Username of whoever invited you" value={referralCode} onChange={e => setReferralCode(e.target.value)} />
+            )}
+            {initialReferralCode && referralCode === initialReferralCode && (
+              <p className="text-xs text-emerald-400 mt-1.5">Applied from your referral link</p>
+            )}
+          </div>
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          <PrimaryButton type="submit" className="mt-2">Continue <ArrowRight className="w-4 h-4" /></PrimaryButton>
+        </form>
+        <p className="text-center text-sm text-neutral-500 mt-6">
+          Already have an account?{' '}
+          <button onClick={goLogin} className="text-white font-medium hover:underline">Log in</button>
+        </p>
+      </AuthShell>
+    );
   }
 
   return (
-    <AuthShell title="Create your account" subtitle="Money, simplified. Set up your wallet in a minute." brandLabel={isDashboard ? 'Tranxact Pay' : 'Tranxact'} tagline={isDashboard ? 'Payment Dashboard' : undefined}>
+    <AuthShell title="Secure your account" subtitle="You'll use these to log in." brandLabel={brand} tagline={tagline}>
+      <div className="flex items-center justify-between mb-6">
+        <button type="button" onClick={() => { setError(''); setStep(1); }} className="flex items-center gap-1 text-sm text-neutral-400 hover:text-white transition">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <StepDotsInline step={2} />
+      </div>
       <form className="space-y-4" onSubmit={handleSubmit}>
-        <Field label="Full name" icon={User} type="text" placeholder="David Adeyemi" required value={fullName} onChange={e => setFullName(e.target.value)} />
-        <Field label="Username" icon={User} type="text" placeholder="david" required value={username} onChange={e => setUsername(e.target.value)} />
-        <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" required value={email} onChange={e => setEmail(e.target.value)} />
-        <label className="block">
-          <span className="text-sm text-neutral-400 mb-2 block">Password</span>
-          <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 focus-within:border-[#8B5CF6] transition">
-            <Lock className="w-4 h-4 text-neutral-500 flex-shrink-0" />
-            <input
-              type={showPw ? 'text' : 'password'}
-              placeholder="At least 8 characters"
-              required
-              minLength={8}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="bg-transparent outline-none text-white placeholder-neutral-600 text-sm w-full"
-            />
-            <button type="button" onClick={() => setShowPw(v => !v)} className="text-neutral-500 hover:text-white transition">
-              {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-        </label>
+        <Field label="Email" icon={Mail} type="email" placeholder="you@example.com" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} />
         <div>
-          {isDashboard && (
-            <Field label="What are you accepting payments for?" icon={Landmark} type="text" placeholder="e.g. event tickets, consulting, product sales" value={businessName} onChange={e => setBusinessName(e.target.value)} />
-          )}
-          {!isDashboard && (
-            <Field label="Referral code (optional)" icon={Users} type="text" placeholder="username of whoever referred you" value={referralCode} onChange={e => setReferralCode(e.target.value)} />
-          )}
-          {initialReferralCode && referralCode === initialReferralCode && (
-            <p className="text-xs text-emerald-400 mt-1.5">Applied from your referral link</p>
-          )}
+          <PasswordField label="Create password" value={password} onChange={e => setPassword(e.target.value)} show={showPw} onToggle={() => setShowPw(v => !v)} />
+          <PasswordRules password={password} />
+        </div>
+        <div>
+          <PasswordField label="Confirm password" value={confirm} onChange={e => setConfirm(e.target.value)} show={showPw} onToggle={() => setShowPw(v => !v)} invalid={mismatch} />
+          {mismatch && <p className="text-xs text-red-400 mt-1.5">Passwords don't match yet.</p>}
+          {!mismatch && confirm.length > 0 && confirm === password && <p className="text-xs text-emerald-400 mt-1.5 flex items-center gap-1"><Check className="w-3 h-3" /> Passwords match</p>}
         </div>
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <PrimaryButton type="submit" className="mt-2" disabled={loading}>
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Create Account <ArrowRight className="w-4 h-4" /></>}
+        <PrimaryButton type="submit" className="mt-2" disabled={loading || !passwordOk(password) || password !== confirm || !email.trim()}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Create account <ArrowRight className="w-4 h-4" /></>}
         </PrimaryButton>
+        <p className="text-xs text-neutral-500 leading-relaxed text-center">
+          By creating an account, you agree to Tranxact's{' '}
+          <a href="https://tranxact.co/terms.html" target="_blank" rel="noopener noreferrer" className="text-neutral-300 underline underline-offset-2">Terms of Use</a>{' '}and{' '}
+          <a href="https://tranxact.co/privacy.html" target="_blank" rel="noopener noreferrer" className="text-neutral-300 underline underline-offset-2">Privacy Policy</a>.
+        </p>
       </form>
-      <p className="text-center text-sm text-neutral-500 mt-6">
-        Already have an account?{' '}
-        <button onClick={goLogin} className="text-white font-medium hover:underline">Log in</button>
-      </p>
     </AuthShell>
+  );
+}
+
+function StepDotsInline({ step, total = 2 }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {Array.from({ length: total }).map((_, i) => (
+        <span key={i} className={`h-1 rounded-full ${i < step ? 'bg-[#8B5CF6] w-8' : 'bg-neutral-800 w-4'}`} />
+      ))}
+      <span className="text-xs text-neutral-500 ml-2">Step {step} of {total}</span>
+    </div>
   );
 }
 
@@ -941,7 +1086,7 @@ function ForgotScreen({ onDone, goLogin, isDashboard, prefillEmail }) {
     e.preventDefault();
     setError(''); setNote('');
     if (!verified && code.length !== AUTH_CODE_LENGTH) { setError(`Enter the ${AUTH_CODE_LENGTH}-digit code from your email.`); return; }
-    if (password.length < 8) { setError('Your new password needs at least 8 characters.'); return; }
+    if (!passwordOk(password)) { setError('Your new password needs 8+ characters, an uppercase letter and a number.'); return; }
     setLoading(true);
     try {
       if (!verified) {
@@ -1012,9 +1157,10 @@ function ForgotScreen({ onDone, goLogin, isDashboard, prefillEmail }) {
             </button>
           </div>
         </label>
+        <PasswordRules password={password} />
         {error && <p className="text-sm text-red-400">{error}</p>}
         {note && <p className="text-sm text-emerald-400">{note}</p>}
-        <PrimaryButton type="submit" disabled={loading}>
+        <PrimaryButton type="submit" disabled={loading || !passwordOk(password)}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save new password'}
         </PrimaryButton>
       </form>
@@ -1098,104 +1244,128 @@ function ServiceTile({ label, icon: Icon, onClick, ready = true }) {
   );
 }
 
-// ---------- Branded receipt (Tranxact equivalent of OPay's "Share Receipt") ----------
-// Requires two extra dependencies: `html2canvas` (renders this DOM node into a
-// real PNG canvas) and `jspdf` (wraps that PNG into a one-page PDF). Neither
-// was confirmed present in package.json — run:
-//   npm install html2canvas jspdf
-// before shipping this, or the two share buttons below will throw on tap.
-const ReceiptCard = React.forwardRef(({ tx }, ref) => {
-  const positive = tx.amount > 0;
-  const otherPartyLabel = tx.counterparty ? (positive ? 'Sender Details' : 'Recipient Details') : null;
-  const maskedRef = tx.id ? `${tx.id.slice(0, 8)}${'*'.repeat(4)}${tx.id.slice(-4)}` : '';
+// ---------- Receipts ----------
+// Short and screenshot-friendly: what happened, how much, and a reference. People already saw the rate
+// and fee before sending, so the receipt doesn't repeat them. The details come from get_transaction_receipt
+// (coin, network, payer, bank); if that can't load it falls back to the list row.
+const NETWORK_SHORT = { TRC20: 'Tron', ERC20: 'Ethereum', BEP20: 'BNB Chain', SOL: 'Solana', BTC: 'Bitcoin' };
+const RECEIPT_STATUS = {
+  settled: { label: 'Successful', dot: '#34D399' }, paid: { label: 'Successful', dot: '#34D399' },
+  completed: { label: 'Successful', dot: '#34D399' }, pending: { label: 'Pending', dot: '#FBBF24' },
+  failed: { label: 'Failed', dot: '#F87171' }, reversed: { label: 'Reversed', dot: '#F87171' },
+};
+const fmtCryptoAmt = (n, sym) => `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 })} ${sym || ''}`.trim();
+const firstNameLastInitial = (name) => {
+  const p = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return p.length > 1 ? `${p[0]} ${p[p.length - 1][0].toUpperCase()}.` : (p[0] || '');
+};
 
-  // Bills, withdrawals, and bank deposits all carry real, specific detail
-  // in their description now (what was bought, whose meter, which bank
-  // account) — worth showing on the receipt itself, not just in a list row.
-  // Reversal/internal text is deliberately excluded, that's not something
-  // a customer sharing a receipt should ever see.
-  const detailTypes = ['bill_payment', 'withdrawal', 'send_bank', 'fund_bank', 'crypto_deposit'];
-  const showDescription = detailTypes.includes(tx.type) && tx.description && !/^reversal/i.test(tx.description);
-  const detailLabel = {
-    bill_payment: 'Purchase Details',
-    withdrawal: 'Bank Details',
-    send_bank: 'Bank Details',
-    fund_bank: 'Received From',
-    crypto_deposit: 'Received From',
-  }[tx.type] || 'Details';
+function buildReceipt(tx, d) {
+  const type = d?.type || tx.type;
+  const statusKey = String(d?.status || tx.status || 'settled').toLowerCase();
+  const status = RECEIPT_STATUS[statusKey] || { label: statusKey.replace(/_/g, ' '), dot: '#A3A3A3' };
+  const amount = d?.amount != null ? Number(d.amount) : tx.amount;
+  const date = d?.created_at
+    ? new Date(normalizeTimestamp(d.created_at)).toLocaleString('en-NG', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : tx.fullTime;
+  const asset = d?.crypto_asset || tx.cryptoAsset;
+  const net = d?.network ? NETWORK_SHORT[d.network] || d.network : null;
+  const cryptoLine = asset ? `${d?.crypto_amount ? fmtCryptoAmt(d.crypto_amount, asset) : asset}${net ? ` on ${net}` : ''}` : null;
 
+  let headline = tx.title;
+  let sub = null;
+  if (type === 'crypto_deposit') { headline = 'You received'; sub = cryptoLine; }
+  else if (type === 'tranxactpay') {
+    headline = d?.is_tip ? 'You got tipped' : 'You got paid';
+    const who = d?.payer_name ? firstNameLastInitial(d.payer_name) : null;
+    sub = [d?.is_tip ? null : (d?.link_title || null), who ? `by ${who}` : null].filter(Boolean).join(' · ') || null;
+  } else if (type === 'fund_bank') { headline = 'You received'; sub = 'Bank transfer'; }
+  else if ((type === 'withdrawal' || type === 'send_bank') && d?.bank_account_name) {
+    headline = 'Sent to bank';
+    sub = `${d.bank_account_name} · ${d.bank_name} ${d.bank_account_masked?.slice(-6) || ''}`.trim();
+  } else if (tx.counterparty) {
+    headline = amount > 0 ? 'You received' : 'You sent';
+    sub = `${amount > 0 ? 'from' : 'to'} @${tx.counterparty}`;
+  }
+
+  const reference = d?.reference || (tx.id ? `TRX-${tx.id.replace(/-/g, '').slice(0, 10).toUpperCase()}` : '');
+  return { type, status, amount, date, asset, headline, sub, reference };
+}
+
+// The visual itself, shared by the detail sheet and the shareable image.
+function ReceiptFace({ tx, r, onCopyRef, copied }) {
+  const positive = r.amount > 0;
   return (
-    <div
-      ref={ref}
-      className="relative overflow-hidden rounded-2xl p-6"
-      style={{ background: '#111114', border: '1px solid #27272a', width: 360 }}
-    >
-      {/* Faint repeated wordmark watermark, like OPay's receipt background */}
-      <div
-        className="absolute inset-0 opacity-[0.05] pointer-events-none select-none"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '28px',
-          padding: '10px',
-          transform: 'rotate(-18deg) scale(1.4)',
-          color: '#fff',
-          fontWeight: 800,
-          fontSize: 13,
-          letterSpacing: 1,
-        }}
-      >
-        {Array.from({ length: 40 }).map((_, i) => <span key={i}>Tranxact</span>)}
-      </div>
-
-      <div className="relative flex items-center justify-between mb-8">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center flex-shrink-0">
-            <LogoMark size={16} />
+    <>
+      <div className="relative flex flex-col items-center text-center pt-1">
+        <div className="relative">
+          {r.asset ? (
+            <CoinIcon symbol={r.asset} size={52} />
+          ) : (
+            <div className="w-[52px] h-[52px] rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center"><LogoMark size={24} /></div>
+          )}
+          <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center border-2 border-[#111114]" style={{ background: r.status.dot }}>
+            {r.status.label === 'Successful' ? <Check className="w-3 h-3 text-black" strokeWidth={3} /> : <span className="w-1.5 h-1.5 rounded-full bg-black/60" />}
           </div>
-          <span className="font-bold text-white text-sm">Tranxact</span>
         </div>
-        <span className="text-xs text-neutral-400">Transaction Receipt</span>
-      </div>
-
-      <div className="relative text-center mb-6">
-        <div className={`font-mono text-3xl font-bold ${positive ? 'text-emerald-400' : 'text-white'}`}>
-          {fmtNaira(tx.amount)}
+        <div className="text-[13px] text-neutral-400 mt-4">{r.headline}</div>
+        <div className="font-mono text-[34px] leading-tight font-bold text-white mt-1 tracking-tight">
+          {positive ? '' : '-'}{fmtNaira(r.amount)}
         </div>
-        <div className="text-sm text-neutral-300 mt-2 capitalize">{tx.status || 'Settled'}</div>
-        <div className="text-xs text-neutral-500 mt-1">{tx.fullTime}</div>
+        {r.sub && <div className="text-[13px] text-neutral-400 mt-1.5 px-2">{r.sub}</div>}
       </div>
 
-      <div className="relative border-t border-dashed border-neutral-700 pt-5 space-y-4">
-        {otherPartyLabel && (
-          <div>
-            <div className="text-xs text-neutral-500 mb-1">{otherPartyLabel}</div>
-            <div className="text-sm font-semibold text-white">@{tx.counterparty}</div>
-            <div className="text-xs text-neutral-400">Tranxact user</div>
-          </div>
-        )}
-        {showDescription && (
-          <div>
-            <div className="text-xs text-neutral-500 mb-1">{detailLabel}</div>
-            <div className="text-sm font-semibold text-white break-words">{tx.description}</div>
-          </div>
-        )}
-        <div>
-          <div className="text-xs text-neutral-500 mb-1">Transaction No.</div>
-          <div className="text-xs font-mono text-neutral-300 break-all">{maskedRef}</div>
+      {/* ticket tear line */}
+      <div className="relative my-6 -mx-6 flex items-center">
+        <div className="w-4 h-8 rounded-r-full bg-black" />
+        <div className="flex-1 border-t-2 border-dashed border-neutral-800" />
+        <div className="w-4 h-8 rounded-l-full bg-black" />
+      </div>
+
+      <div className="relative space-y-3 text-[13px]">
+        <div className="flex justify-between">
+          <span className="text-neutral-500">Status</span>
+          <span className="flex items-center gap-1.5 text-white"><span className="w-1.5 h-1.5 rounded-full" style={{ background: r.status.dot }} />{r.status.label}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-neutral-500">Date</span>
+          <span className="text-white">{r.date}</span>
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-neutral-500">Reference</span>
+          <span className="font-mono text-xs text-white flex items-center gap-1.5">
+            {r.reference}
+            {onCopyRef && (
+              <button type="button" onClick={onCopyRef} aria-label="Copy reference" className="text-neutral-500 hover:text-white">
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            )}
+          </span>
         </div>
       </div>
+    </>
+  );
+}
 
-      <div className="relative border-t border-dashed border-neutral-700 mt-5 pt-4">
-        <p className="text-[11px] text-neutral-500 leading-relaxed">
-          Tranxact. Send and receive money instantly, get paid with TranxactPay, and convert crypto to naira in seconds.
-        </p>
+const ReceiptCard = React.forwardRef(({ tx, details }, ref) => {
+  const r = buildReceipt(tx, details);
+  return (
+    <div ref={ref} className="relative overflow-hidden rounded-[28px] px-6 pt-5 pb-5" style={{ background: '#111114', width: 340 }}>
+      <div className="absolute inset-x-0 top-0 h-40 pointer-events-none" style={{ background: 'radial-gradient(70% 100% at 50% 0%, rgba(139,92,246,0.22), rgba(139,92,246,0))' }} />
+      <div className="relative flex items-center justify-between mb-6">
+        <div className="flex items-center gap-1.5">
+          <LogoMark size={18} />
+          <span className="font-semibold text-white text-[13px]">Tranxact</span>
+        </div>
+        <span className="text-[11px] text-neutral-500">Receipt</span>
       </div>
+      <ReceiptFace tx={tx} r={r} />
+      <div className="relative text-center text-[11px] text-neutral-600 mt-6">app.tranxact.co</div>
     </div>
   );
 });
 
-function ShareReceiptScreen({ tx, onBack }) {
+function ShareReceiptScreen({ tx, details, onBack }) {
   const [busy, setBusy] = useState(''); // '' | 'image' | 'pdf'
   const [error, setError] = useState('');
   useClearOnEdit(error, setError);
@@ -1231,7 +1401,7 @@ function ShareReceiptScreen({ tx, onBack }) {
     // on every image before drawing it — without allowTaint explicitly set,
     // an image it's not fully certain about gets silently skipped, not
     // errored. Combined with a generous imageTimeout as a second safety net.
-    return html2canvas(cardRef.current, { backgroundColor: '#111114', scale: 3, allowTaint: true, imageTimeout: 15000, useCORS: true });
+    return html2canvas(cardRef.current, { backgroundColor: '#000000', scale: 3, allowTaint: true, imageTimeout: 15000, useCORS: true });
   };
 
   const shareAsImage = async () => {
@@ -1288,7 +1458,7 @@ function ShareReceiptScreen({ tx, onBack }) {
       <div className="max-w-sm mx-auto px-5 pt-6 pb-10" style={{ paddingTop: 'calc(1.5rem + env(safe-area-inset-top))' }}>
         <BackHeader title="Share Receipt" onBack={onBack} />
         <div className="flex justify-center mb-6">
-          <ReceiptCard tx={tx} ref={cardRef} />
+          <ReceiptCard tx={tx} details={details} ref={cardRef} />
         </div>
         {error && <p className="text-sm text-red-400 text-center mb-4">{error}</p>}
         <div className="flex items-center justify-center gap-8 border-t border-neutral-900 pt-5">
@@ -1309,71 +1479,50 @@ function ShareReceiptScreen({ tx, onBack }) {
 
 function TransactionDetailModal({ tx, onClose, onSendAgain }) {
   const [showShare, setShowShare] = useState(false);
-  const positive = tx.amount > 0;
-  const Icon = tx.icon;
-  const isPeer = tx.type === 'send_user' && tx.counterparty;
-  const isBank = tx.type === 'send_bank';
-  const isCrypto = tx.type === 'crypto_deposit' && tx.cryptoAsset;
-  const rows = [
-    { label: 'Status', value: <span className="capitalize">{tx.status || 'settled'}</span> },
-    { label: 'Date & time', value: tx.fullTime },
-    { label: 'Reference', value: <span className="font-mono text-xs">{tx.id}</span> },
-  ];
-  if (tx.counterparty) rows.splice(1, 0, { label: tx.type === 'send_user' ? 'To/From' : 'User', value: `@${tx.counterparty}` });
-  if (tx.cryptoAsset) rows.splice(1, 0, { label: 'Asset', value: tx.cryptoAsset });
-  if (tx.description) rows.push({ label: 'Description', value: tx.description });
+  const [details, setDetails] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getTransactionReceipt(tx.id)
+      .then((d) => { if (alive) setDetails(d); })
+      .catch(() => { /* fall back to the list row's info */ })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [tx.id]);
 
-  if (showShare) return <ShareReceiptScreen tx={tx} onBack={() => setShowShare(false)} />;
+  const r = buildReceipt(tx, details);
+  const isPeer = tx.type === 'send_user' && tx.counterparty;
+  const copyRef = () => { navigator.clipboard?.writeText(r.reference); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+
+  if (showShare) return <ShareReceiptScreen tx={tx} details={details} onBack={() => setShowShare(false)} />;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full sm:max-w-sm bg-neutral-950 border border-neutral-800 rounded-t-3xl sm:rounded-3xl p-6">
-        <div className="flex flex-col items-center text-center mb-6">
-          {isPeer ? (
-            <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center">
-              <LogoMark size={22} />
-            </div>
-          ) : isCrypto ? (
-            <CoinIcon symbol={tx.cryptoAsset} size={48} />
-          ) : isBank ? (
-            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-              <Landmark className="w-5 h-5 text-neutral-300" />
-            </div>
+      <div className="relative w-full sm:max-w-sm bg-black border border-neutral-900 rounded-t-3xl sm:rounded-3xl p-5">
+        <div className="w-10 h-1 rounded-full bg-neutral-800 mx-auto mb-5 sm:hidden" />
+        <div className="relative overflow-hidden rounded-[24px] px-6 pt-6 pb-6" style={{ background: '#111114' }}>
+          <div className="absolute inset-x-0 top-0 h-36 pointer-events-none" style={{ background: 'radial-gradient(70% 100% at 50% 0%, rgba(139,92,246,0.18), rgba(139,92,246,0))' }} />
+          {loading ? (
+            <div className="py-16 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
           ) : (
-            <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-              <Icon className="w-5 h-5 text-neutral-300" />
-            </div>
+            <ReceiptFace tx={tx} r={r} onCopyRef={copyRef} copied={copied} />
           )}
-          <div className={`font-mono text-2xl font-bold mt-3 ${positive ? 'text-emerald-400' : 'text-white'}`}>
-            {positive ? '+' : '-'}{fmtNaira(tx.amount)}
-          </div>
-          <div className="text-sm text-neutral-500 mt-1">{tx.title}</div>
-        </div>
-        <div className="bg-neutral-900 border border-neutral-800 rounded-xl divide-y divide-neutral-800">
-          {rows.map(r => (
-            <div key={r.label} className="flex items-center justify-between px-4 py-3">
-              <span className="text-xs text-neutral-500">{r.label}</span>
-              <span className="text-sm text-right ml-4">{r.value}</span>
-            </div>
-          ))}
         </div>
 
-        {isPeer && !positive && onSendAgain && (
-          <div className="bg-neutral-900 border border-neutral-800 rounded-xl mt-4 px-4 py-3">
-            <button
-              onClick={() => { onSendAgain(tx.counterparty); onClose(); }}
-              className="w-full flex items-center gap-2 text-sm text-emerald-400"
-            >
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <button onClick={() => setShowShare(true)} disabled={loading} className="bg-white text-black text-sm font-semibold rounded-full py-3 flex items-center justify-center gap-2 disabled:opacity-50">
+            <Share2 className="w-4 h-4" /> Share
+          </button>
+          {isPeer && r.amount < 0 && onSendAgain ? (
+            <button onClick={() => { onSendAgain(tx.counterparty); onClose(); }} className="bg-neutral-900 border border-neutral-800 text-white text-sm font-medium rounded-full py-3 flex items-center justify-center gap-2">
               <ArrowUpFromLine className="w-4 h-4" /> Send again
             </button>
-          </div>
-        )}
-
-        <button onClick={() => setShowShare(true)} className="w-full mt-4 bg-neutral-900 border border-neutral-800 text-white text-sm font-medium rounded-xl py-3 flex items-center justify-center gap-2 hover:bg-neutral-800 transition">
-          <Share2 className="w-4 h-4" /> Share receipt
-        </button>
-        <button onClick={onClose} className="w-full mt-3 text-sm text-neutral-500 hover:text-white transition py-2">Close</button>
+          ) : (
+            <button onClick={onClose} className="bg-neutral-900 border border-neutral-800 text-white text-sm font-medium rounded-full py-3">Done</button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -5534,7 +5683,39 @@ function UsernameScreen({ onBack, currentUsername, onChanged }) {
   );
 }
 
-function SecurityScreen({ onBack, onPinSet, hasPin }) {
+function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId }) {
+  // Login PIN (6 digits, opens the app) and Face ID on this phone.
+  const [lpOld, setLpOld] = useState('');
+  const [lpNew, setLpNew] = useState('');
+  const [lpBusy, setLpBusy] = useState(false);
+  const [lpMsg, setLpMsg] = useState({ ok: '', err: '' });
+  const [faceOn, setFaceOn] = useState(!!faceIdCredentialOnThisDevice());
+  const [faceBusy, setFaceBusy] = useState(false);
+  const [faceErr, setFaceErr] = useState('');
+
+  const changeLoginPin = async (e) => {
+    e.preventDefault();
+    setLpMsg({ ok: '', err: '' });
+    if (lpNew === lpOld) { setLpMsg({ ok: '', err: 'Choose a different PIN.' }); return; }
+    setLpBusy(true);
+    try {
+      const r = await setLoginPin(lpNew, lpOld);
+      if (!r?.ok) setLpMsg({ ok: '', err: 'Current login PIN is incorrect.' });
+      else { setLpMsg({ ok: 'Login PIN changed.', err: '' }); setLpOld(''); setLpNew(''); }
+    } catch (err) { setLpMsg({ ok: '', err: err.message }); }
+    finally { setLpBusy(false); }
+  };
+
+  const toggleFace = async () => {
+    setFaceErr(''); setFaceBusy(true);
+    try {
+      if (faceOn) { await turnOffFaceId(); setFaceOn(false); }
+      else { await registerFaceId(detectPlatform() === 'ios' ? 'iPhone' : 'Phone'); setFaceOn(true); }
+    } catch (err) {
+      if (err?.name !== 'NotAllowedError' && err?.name !== 'AbortError') setFaceErr(err?.message || 'Could not change this.');
+    } finally { setFaceBusy(false); }
+  };
+
   const [newPassword, setNewPassword] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState('');
@@ -5595,13 +5776,48 @@ function SecurityScreen({ onBack, onPinSet, hasPin }) {
       <BackHeader title="Security" onBack={onBack} />
       <form onSubmit={handlePasswordChange} className="space-y-4">
         <h2 className="text-sm font-semibold">Change password</h2>
-        <Field label="New password" type="password" minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters" />
+        <div>
+          <Field label="New password" type="password" minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="8+ characters, 1 uppercase, 1 number" />
+          <PasswordRules password={newPassword} />
+        </div>
         {pwError && <p className="text-sm text-red-400">{pwError}</p>}
         {pwSuccess && <p className="text-sm text-emerald-400">Password updated.</p>}
-        <PrimaryButton type="submit" disabled={pwLoading || newPassword.length < 8}>
+        <PrimaryButton type="submit" disabled={pwLoading || !passwordOk(newPassword)}>
           {pwLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Update password'}
         </PrimaryButton>
       </form>
+
+      <div className="space-y-4 pt-6 border-t border-neutral-900">
+        <h2 className="text-sm font-semibold">Unlocking the app</h2>
+        {canFaceId && (
+          <div className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3.5">
+            <div className="flex items-center gap-3">
+              {detectPlatform() === 'ios' ? <ScanFace className="w-5 h-5 text-[#A78BFA]" /> : <Fingerprint className="w-5 h-5 text-[#A78BFA]" />}
+              <div>
+                <div className="text-sm font-medium">Unlock with {bioName()}</div>
+                <div className="text-xs text-neutral-500">On this phone only</div>
+              </div>
+            </div>
+            <button
+              type="button" onClick={toggleFace} disabled={faceBusy} role="switch" aria-checked={faceOn}
+              className={`relative w-11 h-6 rounded-full transition ${faceOn ? 'bg-[#8B5CF6]' : 'bg-neutral-700'} disabled:opacity-50`}
+            >
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${faceOn ? 'left-[22px]' : 'left-0.5'}`} />
+            </button>
+          </div>
+        )}
+        {faceErr && <p className="text-sm text-red-400">{faceErr}</p>}
+        <form onSubmit={changeLoginPin} className="space-y-4">
+          <Field label="Current login PIN" type="password" inputMode="numeric" value={lpOld} onChange={e => setLpOld(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" />
+          <Field label="New login PIN (6 digits)" type="password" inputMode="numeric" value={lpNew} onChange={e => setLpNew(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" />
+          {lpMsg.err && <p className="text-sm text-red-400">{lpMsg.err}</p>}
+          {lpMsg.ok && <p className="text-sm text-emerald-400">{lpMsg.ok}</p>}
+          <PrimaryButton type="submit" disabled={lpBusy || lpOld.length < 6 || lpNew.length < 6}>
+            {lpBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change login PIN'}
+          </PrimaryButton>
+          <p className="text-xs text-neutral-600">Forgot it? Tap "Forgot PIN" on the lock screen to log in with your password and set a new one.</p>
+        </form>
+      </div>
 
       <form onSubmit={handlePinChange} className="space-y-4 pt-6 border-t border-neutral-900">
         <h2 className="text-sm font-semibold">Transaction PIN</h2>
@@ -5613,43 +5829,6 @@ function SecurityScreen({ onBack, onPinSet, hasPin }) {
           {pinLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (hasPin ? 'Change PIN' : 'Set PIN')}
         </PrimaryButton>
       </form>
-    </div>
-  );
-}
-
-function SettingsScreen({ onBack, initialLimit, initialPushEnabled }) {
-  const [limit, setLimit] = useState(initialLimit != null ? String(initialLimit) : '');
-  const [limitLoading, setLimitLoading] = useState(false);
-  const [limitSaved, setLimitSaved] = useState(false);
-
-
-  const saveLimit = async () => {
-    setLimitLoading(true);
-    setLimitSaved(false);
-    try {
-      await updateSpendingLimit(limit ? Number(limit) : null);
-      setLimitSaved(true);
-    } finally {
-      setLimitLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-8">
-      <BackHeader title="Settings" onBack={onBack} />
-      <div>
-        <h2 className="text-sm font-semibold mb-3">Daily spending limit</h2>
-        <div className="flex gap-2">
-          <MoneyField label="Amount (NGN, optional)" value={limit} onValue={setLimit} placeholder="No limit set" />
-        </div>
-        <p className="text-xs text-neutral-600 mt-2">Applies to sends and withdrawals. Resets on a rolling 24-hour basis. Leave blank for no limit.</p>
-        {limitSaved && <p className="text-sm text-emerald-400 mt-2">Saved.</p>}
-        <PrimaryButton onClick={saveLimit} disabled={limitLoading} className="mt-4">
-          {limitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save limit'}
-        </PrimaryButton>
-      </div>
-
-
     </div>
   );
 }
@@ -6368,8 +6547,8 @@ function VerificationModal({ onClose, userId }) {
               <div className="w-14 h-14 rounded-full bg-amber-500/15 flex items-center justify-center mx-auto mb-4">
                 <ShieldCheck className="w-6 h-6 text-amber-400" />
               </div>
-              <h2 className="text-lg font-bold mb-1">Not yet verified</h2>
-              <p className="text-sm text-neutral-500">Add your NIN to remove your receiving limit.</p>
+              <h2 className="text-lg font-bold mb-1">Get verified</h2>
+              <p className="text-sm text-neutral-500">Until you verify, you can send up to ₦100,000 in total. Add your NIN to lift your limits.</p>
             </div>
 
             <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 mb-5">
@@ -6387,7 +6566,7 @@ function VerificationModal({ onClose, userId }) {
             </div>
 
             <PrimaryButton onClick={() => setStep('submit-form')}>Add your NIN</PrimaryButton>
-            <button onClick={onClose} className="w-full text-sm text-neutral-500 py-3">Not now</button>
+            <button onClick={onClose} className="w-full text-sm text-neutral-500 py-3">Not now, go back</button>
           </div>
 
         ) : step === 'submit-form' ? (
@@ -7015,20 +7194,81 @@ function PaymentNoticesPanel({ rates, onChanged, view = 'queue' }) {
   );
 }
 
-function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenSecurity, onOpenSettings, onOpenAccountDetails, onOpenAddToHomeScreen, userId, pushEnabled, onPushChange }) {
-  const [showVerification, setShowVerification] = useState(false);
+// ---------- Verification status ----------
+// One place that turns kyc_status into what people see: the badge on Profile, the limits screen, the prompt.
+const KYC_BADGE = {
+  verified: { label: 'Verified', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30', Icon: BadgeCheck },
+  submitted: { label: 'Under review', cls: 'text-amber-300 bg-amber-400/10 border-amber-400/30', Icon: ShieldCheck },
+  restricted: { label: 'Restricted', cls: 'text-red-400 bg-red-500/10 border-red-500/30', Icon: ShieldCheck },
+  unverified: { label: 'Unverified', cls: 'text-red-400 bg-red-500/10 border-red-500/30', Icon: ShieldCheck },
+};
+const kycKey = (s) => (KYC_BADGE[s] ? s : 'unverified');
+// "Ada Obi" -> "AO"; a single word falls back to its first two letters.
+const nameInitials = (name) => {
+  const p = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return p.length > 1 ? (p[0][0] + p[p.length - 1][0]).toUpperCase() : initials(p[0] || '');
+};
+
+function KycBadge({ status, onClick }) {
+  const b = KYC_BADGE[kycKey(status)];
+  const Tag = onClick ? 'button' : 'span';
+  return (
+    <Tag onClick={onClick} className={`inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 border ${b.cls}`}>
+      <b.Icon className="w-3 h-3" /> {b.label}
+    </Tag>
+  );
+}
+
+// ---------- Profile ----------
+function ProfileScreen({ profile, onOpenEarn, onLogout, onOpenRates, onOpenSupport, onOpenSecurity, onOpenLimits, onOpenAccountDetails, onOpenAddToHomeScreen, onOpenVerification, pushEnabled, onPushChange }) {
+  const [copied, setCopied] = useState(false);
+  const status = kycKey(profile?.kyc_status);
+  const name = profile?.full_name || profile?.username || '';
+  const username = profile?.username || '';
+  const copyUsername = () => {
+    navigator.clipboard?.writeText(username);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   const items = [
     { label: 'My profile', icon: UserCircle, onClick: onOpenAccountDetails },
     { label: 'Rates', icon: LineChart, onClick: onOpenRates },
-    { label: 'Verification', icon: ShieldCheck, onClick: () => setShowVerification(true) },
+    { label: 'Verification', icon: ShieldCheck, onClick: onOpenVerification },
+    { label: 'Spending limits', icon: Gauge, onClick: onOpenLimits },
     { label: 'Security', icon: Lock, onClick: onOpenSecurity },
-    { label: 'Settings', icon: Settings, onClick: onOpenSettings },
     { label: 'Add to Home Screen', icon: Home, onClick: onOpenAddToHomeScreen },
-    { label: 'Help & Support', icon: Smartphone, onClick: onOpenSupport },
   ];
   return (
     <div>
-      <h1 className="text-xl font-bold mb-6">Profile</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-bold">Profile</h1>
+        <button onClick={onOpenSupport} aria-label="Help and support" className="flex items-center gap-1.5 text-xs font-medium text-neutral-300 bg-neutral-950 border border-neutral-800 rounded-full pl-2.5 pr-3 py-1.5 hover:bg-neutral-900 transition">
+          <Headphones className="w-3.5 h-3.5" /> Help
+        </button>
+      </div>
+
+      <div className="flex flex-col items-center text-center mb-6">
+        <div className="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: avatarColor(name) }}>
+          {nameInitials(name)}
+        </div>
+        <div className="text-lg font-semibold text-white mt-3">{profile?.full_name || '—'}</div>
+        <button onClick={copyUsername} className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition mt-0.5" aria-label="Copy username">
+          @{username}
+          {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+        </button>
+        {copied && <span className="text-[11px] text-emerald-400 mt-1">Copied — share it as your referral code</span>}
+        <div className="mt-2.5"><KycBadge status={status} onClick={status === 'verified' ? undefined : onOpenVerification} /></div>
+      </div>
+
+      <button onClick={onOpenEarn} className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 mb-4 text-left border border-[#8B5CF6]/30 hover:border-[#8B5CF6]/60 transition" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.20), rgba(139,92,246,0.04))' }}>
+        <div className="w-10 h-10 rounded-full bg-[#8B5CF6] flex items-center justify-center flex-shrink-0"><Gift className="w-5 h-5 text-white" /></div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-white">Earn with Tranxact</div>
+          <div className="text-xs text-neutral-400">Invite friends and earn cashback</div>
+        </div>
+        <ChevronRight className="w-4 h-4 text-neutral-400" />
+      </button>
+
       <NotificationsRow initialEnabled={pushEnabled} onOpenAddToHomeScreen={onOpenAddToHomeScreen} onChange={onPushChange} />
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900 mb-4">
         {items.map(it => (
@@ -7037,17 +7277,263 @@ function ProfileScreen({ onLogout, onOpenRates, onOpenSupport, onOpenSecurity, o
               <it.icon className="w-4 h-4 text-neutral-400" />
               <span className="text-sm font-medium">{it.label}</span>
             </div>
-            <div className="flex items-center gap-2">
-              {it.badge && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">{it.badge}</span>}
-              <ChevronRight className="w-4 h-4 text-neutral-600" />
-            </div>
+            <ChevronRight className="w-4 h-4 text-neutral-600" />
           </button>
         ))}
       </div>
       <button onClick={onLogout} className="w-full flex items-center justify-center gap-2 text-red-400 text-sm font-medium py-3.5 hover:text-red-300 transition">
         <LogOut className="w-4 h-4" /> Log out
       </button>
-      {showVerification && <VerificationModal onClose={() => setShowVerification(false)} userId={userId} />}
+    </div>
+  );
+}
+
+// ---------- Spending limits ----------
+function LimitBar({ used, cap, tone = '#8B5CF6' }) {
+  const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
+  return (
+    <div className="h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: pct >= 90 ? '#F87171' : tone }} />
+    </div>
+  );
+}
+
+// Limits read cleaner without kobo: ₦100,000 rather than ₦100,000.00.
+const fmtLimit = (n) => `₦${Number(n || 0).toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
+
+// One channel's limit card: a headline max, with the used/left breakdown tucked under "More details".
+function LimitCard({ icon: Icon, tint, title, label, value, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-3.5">
+        <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${tint}1F` }}>
+          <Icon className="w-4 h-4" style={{ color: tint }} />
+        </div>
+        <span className="text-sm font-semibold">{title}</span>
+      </div>
+      <div className="border-t border-neutral-900 px-4 py-3.5">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-neutral-500">{label}</span>
+          <span className="font-semibold text-white">{value}</span>
+        </div>
+        {children && (
+          <>
+            {open && <div className="mt-3 pt-3 border-t border-neutral-900 space-y-2.5">{children}</div>}
+            <button onClick={() => setOpen(v => !v)} className="w-full flex items-center justify-center gap-1 text-xs font-medium text-[#A78BFA] mt-3">
+              {open ? 'Hide details' : 'More details'} <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LimitRow({ k, v, strong }) {
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-neutral-500">{k}</span>
+      <span className={strong ? 'text-white font-semibold' : 'text-neutral-300'}>{v}</span>
+    </div>
+  );
+}
+
+// The account levels, shown from the "Spending levels" button.
+function SpendingLevelsSheet({ status, sendCap, receiveCap, onClose, onVerify }) {
+  const levels = [
+    { key: 'unverified', name: 'Level 1', tag: 'Unverified', rows: [
+      ['Send (users + banks)', sendCap ? `${fmtLimit(sendCap)} total` : 'Limited'],
+      ['Receive', receiveCap ? `${fmtLimit(receiveCap)} total` : 'Limited'],
+      ['Bills & airtime', 'From your balance'],
+    ] },
+    { key: 'verified', name: 'Level 2', tag: 'Verified', rows: [
+      ['Send (users + banks)', 'No set limit'],
+      ['Receive', 'No limit'],
+      ['Bills & airtime', 'From your balance'],
+    ] },
+  ];
+  const current = status === 'verified' ? 'verified' : 'unverified';
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full sm:max-w-sm bg-neutral-950 border border-neutral-800 rounded-t-3xl sm:rounded-3xl p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-bold">Spending levels</h2>
+          <button onClick={onClose} aria-label="Close" className="text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="space-y-3">
+          {levels.map((l) => (
+            <div key={l.key} className={`rounded-2xl border p-4 ${l.key === current ? 'border-[#8B5CF6]/60 bg-[#8B5CF6]/10' : 'border-neutral-800 bg-neutral-900'}`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold">{l.name} · <span className="text-neutral-400 font-normal">{l.tag}</span></div>
+                {l.key === current && <span className="text-[10px] font-semibold uppercase tracking-wide text-[#C4B5FD]">You're here</span>}
+              </div>
+              <div className="space-y-2">{l.rows.map(([k, v]) => <LimitRow key={k} k={k} v={v} />)}</div>
+            </div>
+          ))}
+        </div>
+        {current === 'unverified' && status !== 'submitted' && (
+          <PrimaryButton onClick={onVerify} className="mt-5">Verify to reach Level 2</PrimaryButton>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SpendingLimitsScreen({ onBack, profile, onOpenVerification }) {
+  const [tab, setTab] = useState('transfers');
+  const [limits, setLimits] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [showLevels, setShowLevels] = useState(false);
+  const [limit, setLimit] = useState(profile?.daily_spending_limit != null ? String(profile.daily_spending_limit) : '');
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => getMyLimits().then(setLimits).catch((e) => setLoadError(e.message));
+  useEffect(() => { load(); }, []);
+
+  const saveLimit = async () => {
+    setSaving(true);
+    try { await updateSpendingLimit(limit ? Number(limit) : null); setEditing(false); load(); }
+    finally { setSaving(false); }
+  };
+
+  const status = kycKey(limits?.kyc_status || profile?.kyc_status);
+  const verified = status === 'verified';
+  // Until they verify, sends to users and to banks share one ₦100k total.
+  const cap = limits?.send_cap != null ? Number(limits.send_cap) : null;
+  const sent = Number(limits?.sent_total ?? limits?.sent_today ?? 0);
+  const left = cap != null ? Math.max(0, cap - sent) : null;
+  const personal = limits?.personal_limit != null ? Number(limits.personal_limit) : null;
+  const receiveCap = Number(limits?.receive_cap || 0);
+  const received = Number(limits?.received_total || 0);
+  const maxLabel = cap != null ? 'Max total limit' : (personal != null ? 'Max daily limit' : 'Limit');
+  const maxValue = cap != null ? fmtLimit(cap) : (personal != null ? fmtLimit(personal) : 'No limit');
+
+  const transferDetails = cap != null ? (
+    <>
+      <LimitRow k="Sent so far" v={fmtLimit(sent)} />
+      <LimitRow k="Left to send" v={fmtLimit(left)} strong />
+      <LimitBar used={sent} cap={cap} />
+      <p className="text-[11px] text-neutral-500">Shared between Tranxact users and banks until you verify.</p>
+    </>
+  ) : personal != null ? (
+    <>
+      <LimitRow k="Sent today" v={fmtLimit(Number(limits?.sent_today || 0))} />
+      <LimitRow k="Left today" v={fmtLimit(Math.max(0, personal - Number(limits?.sent_today || 0)))} strong />
+      <p className="text-[11px] text-neutral-500">Your own daily limit. Resets on a rolling 24 hours.</p>
+    </>
+  ) : null;
+
+  return (
+    <div className="pb-28">
+      <BackHeader title="Spending limits" onBack={onBack} />
+
+      <TabToggle options={[{ value: 'transfers', label: 'Transfers' }, { value: 'bills', label: 'Bills' }]} value={tab} onChange={setTab} />
+
+      {limits === null && !loadError ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-neutral-600" /></div>
+      ) : loadError ? (
+        <p className="text-sm text-red-400">{loadError}</p>
+      ) : tab === 'transfers' ? (
+        <div className="space-y-3">
+          <LimitCard icon={Users} tint="#8B5CF6" title="Tranxact to Tranxact" label={maxLabel} value={maxValue}>{transferDetails}</LimitCard>
+          <LimitCard icon={Landmark} tint="#38BDF8" title="Tranxact to Bank" label={maxLabel} value={maxValue}>{transferDetails}</LimitCard>
+          {!verified && receiveCap > 0 && (
+            <LimitCard icon={ArrowDownToLine} tint="#34D399" title="Receiving" label="Max total limit" value={fmtLimit(receiveCap)}>
+              <LimitRow k="Received so far" v={fmtLimit(received)} />
+              <LimitRow k="Left to receive" v={fmtLimit(Math.max(0, receiveCap - received))} strong />
+              <LimitBar used={received} cap={receiveCap} tone="#34D399" />
+            </LimitCard>
+          )}
+
+          <div className="flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3.5">
+            <div>
+              <div className="text-sm font-medium">My daily limit</div>
+              <div className="text-xs text-neutral-500 mt-0.5">{personal != null ? `${fmtLimit(personal)} a day` : 'Optional, for extra safety'}</div>
+            </div>
+            {!editing && <button onClick={() => setEditing(true)} className="text-xs font-medium text-[#A78BFA]">{personal != null ? 'Change' : 'Set'}</button>}
+          </div>
+          {editing && (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+              <MoneyField label="Daily amount" value={limit} onValue={setLimit} placeholder="Leave blank for none" />
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => setEditing(false)} className="flex-1 text-sm text-neutral-400 bg-neutral-900 border border-neutral-800 rounded-2xl py-3">Cancel</button>
+                <PrimaryButton onClick={saveLimit} disabled={saving} className="flex-1">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}</PrimaryButton>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <LimitCard icon={Smartphone} tint="#F59E0B" title="Airtime & data" label="Limit" value="Your balance" />
+          <LimitCard icon={Zap} tint="#FACC15" title="Electricity & TV" label="Limit" value="Your balance" />
+        </div>
+      )}
+
+      {limits && !verified && (
+        <div className="flex gap-3 mt-4 rounded-2xl border border-[#8B5CF6]/30 bg-[#8B5CF6]/10 px-4 py-3.5">
+          <Info className="w-4 h-4 text-[#A78BFA] flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-semibold text-[#C4B5FD]">{status === 'submitted' ? 'Verification under review' : 'Need higher limits?'}</div>
+            <p className="text-xs text-neutral-400 mt-0.5">
+              {status === 'submitted' ? 'Your limits lift as soon as you’re approved.' : 'Verify your Tranxact account to remove the send and receive caps.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {limits && (
+        <div className="flex gap-3 mt-6">
+          <button onClick={() => setShowLevels(true)} className="flex-1 text-sm font-semibold text-white bg-neutral-950 border border-neutral-800 rounded-2xl py-3.5 hover:bg-neutral-900 transition">
+            Spending levels
+          </button>
+          {status === 'unverified' && <PrimaryButton onClick={onOpenVerification} className="flex-1">Verify</PrimaryButton>}
+        </div>
+      )}
+
+      {showLevels && (
+        <SpendingLevelsSheet
+          status={status} sendCap={cap || Number(limits?.send_cap || 0) || 100000} receiveCap={receiveCap}
+          onClose={() => setShowLevels(false)}
+          onVerify={() => { setShowLevels(false); onOpenVerification(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------- First-login prompt ----------
+function GetVerifiedPrompt({ firstName, onVerify, onLater }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" />
+      <div className="relative w-full sm:max-w-sm bg-neutral-950 border border-neutral-800 rounded-t-3xl sm:rounded-3xl p-6 overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-36 pointer-events-none" style={{ background: 'radial-gradient(70% 100% at 50% 0%, rgba(139,92,246,0.28), rgba(139,92,246,0))' }} />
+        <div className="relative text-center">
+          <div className="w-16 h-16 rounded-2xl bg-[#8B5CF6] flex items-center justify-center mx-auto mb-5 shadow-[0_10px_40px_-8px_rgba(139,92,246,0.7)]">
+            <ShieldCheck className="w-7 h-7 text-white" />
+          </div>
+          <h2 className="text-xl font-bold">Verify your account{firstName ? `, ${firstName}` : ''}</h2>
+          <p className="text-sm text-neutral-400 mt-2">It takes a couple of minutes and keeps your money safe.</p>
+        </div>
+        <div className="relative mt-6 bg-neutral-900 border border-neutral-800 rounded-2xl divide-y divide-neutral-800">
+          {[
+            { k: 'Until you verify', v: 'Send up to ₦100,000' },
+            { k: 'Once verified', v: 'Higher limits, full access' },
+          ].map((r) => (
+            <div key={r.k} className="flex items-center justify-between px-4 py-3 text-sm">
+              <span className="text-neutral-500">{r.k}</span>
+              <span className="text-white text-right">{r.v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="relative mt-6">
+          <PrimaryButton onClick={onVerify}>Get Verified</PrimaryButton>
+          <button onClick={onLater} className="w-full text-sm text-neutral-500 hover:text-white transition py-3 mt-1">Not now</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -7329,17 +7815,205 @@ function AppShell({ tab, setTab, isAdmin = false, children }) {
 
 // ---------- Root ----------
 
+// ---------- App lock: 6-digit login PIN + Face ID ----------
+const LOGIN_PIN_LENGTH = 6;
+// iPhones say Face ID; Android and others use fingerprint / screen lock.
+const bioName = () => (detectPlatform() === 'ios' ? 'Face ID' : 'fingerprint');
+
+function PinDots({ count, length = LOGIN_PIN_LENGTH, error = false }) {
+  return (
+    <div className={`flex items-center justify-center gap-3.5`}>
+      {Array.from({ length }).map((_, i) => (
+        <span
+          key={i}
+          className={`w-3.5 h-3.5 rounded-full transition-all ${error ? 'bg-red-500' : i < count ? 'bg-[#8B5CF6] scale-110' : 'bg-neutral-800'}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Big round keys. The bottom-left slot is Face ID when it's set up, otherwise empty.
+function NumberPad({ onDigit, onDelete, leftKey = null, disabled = false }) {
+  const key = 'h-[68px] rounded-full flex items-center justify-center text-[26px] font-medium text-white transition active:bg-neutral-800 disabled:opacity-40';
+  return (
+    <div className="grid grid-cols-3 gap-x-6 gap-y-3 max-w-[300px] mx-auto">
+      {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
+        <button key={d} type="button" disabled={disabled} onClick={() => onDigit(d)} className={`${key} bg-neutral-900/70`}>{d}</button>
+      ))}
+      <div className="flex items-center justify-center">{leftKey}</div>
+      <button type="button" disabled={disabled} onClick={() => onDigit('0')} className={`${key} bg-neutral-900/70`}>0</button>
+      <button type="button" disabled={disabled} onClick={onDelete} aria-label="Delete" className={`${key} text-neutral-400`}>
+        <Delete className="w-6 h-6" />
+      </button>
+    </div>
+  );
+}
+
+function FaceIdKey({ onClick }) {
+  return (
+    <button type="button" onClick={onClick} aria-label={`Unlock with ${bioName()}`} className="w-[68px] h-[68px] rounded-full flex items-center justify-center text-[#A78BFA] active:bg-neutral-800 transition">
+      {detectPlatform() === 'ios' ? <ScanFace className="w-8 h-8" /> : <Fingerprint className="w-8 h-8" />}
+    </button>
+  );
+}
+
+// Shown whenever the app opens (or comes back after 5+ minutes) for someone already signed in.
+function AppLockScreen({ profile, faceIdOn, onPin, onFaceId, onForgot, autoFaceId = true }) {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
+  const name = profile?.full_name || profile?.username || '';
+  const first = (profile?.full_name || '').split(' ')[0] || profile?.username || '';
+
+  const tryFaceId = async () => {
+    setError('');
+    try { await onFaceId(); }
+    catch (e) {
+      // Cancelling the system prompt isn't an error worth showing.
+      if (e?.name !== 'NotAllowedError' && e?.name !== 'AbortError') setError(e?.message || `${bioName()} didn't work. Use your PIN.`);
+    }
+  };
+  useEffect(() => { if (faceIdOn && autoFaceId) tryFaceId(); }, []);
+
+  const press = async (d) => {
+    if (checking || pin.length >= LOGIN_PIN_LENGTH) return;
+    setError('');
+    const next = pin + d;
+    setPin(next);
+    if (next.length === LOGIN_PIN_LENGTH) {
+      setChecking(true);
+      let res;
+      try { res = await onPin(next); } catch (e) { res = { ok: false, message: e.message }; } // { ok, attemptsLeft, locked }
+      setChecking(false);
+      if (!res?.ok) {
+        setError(res?.locked ? 'Too many wrong tries. Log in with your password.'
+          : res?.message ? res.message
+          : res?.attemptsLeft != null ? `Wrong PIN. ${res.attemptsLeft} ${res.attemptsLeft === 1 ? 'try' : 'tries'} left.` : 'Wrong PIN.');
+        setTimeout(() => setPin(''), 350);
+      }
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-black text-white flex flex-col px-6 pt-16 pb-10" style={{ paddingTop: 'max(4rem, env(safe-area-inset-top))' }}>
+      <div className="absolute inset-x-0 top-0 h-72 pointer-events-none" style={{ background: 'radial-gradient(60% 100% at 50% 0%, rgba(139,92,246,0.18), rgba(139,92,246,0))' }} />
+      <div className="relative flex flex-col items-center text-center">
+        <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold" style={{ background: avatarColor(name) }}>{nameInitials(name)}</div>
+        <h1 className="text-xl font-bold mt-4">Welcome back{first ? `, ${first}` : ''}</h1>
+        <p className="text-sm text-neutral-500 mt-1">Enter your 6-digit login PIN</p>
+      </div>
+
+      <div className="relative mt-10 mb-3"><PinDots count={pin.length} error={!!error} /></div>
+      <div className="relative h-5 text-center text-xs text-red-400">{error}</div>
+
+      <div className="relative mt-auto">
+        <NumberPad
+          onDigit={press}
+          onDelete={() => { setError(''); setPin((p) => p.slice(0, -1)); }}
+          leftKey={faceIdOn ? <FaceIdKey onClick={tryFaceId} /> : null}
+          disabled={checking}
+        />
+        <button onClick={onForgot} className="block mx-auto mt-6 text-sm text-neutral-400 hover:text-white transition">
+          Forgot PIN? <span className="text-white font-medium">Log in with password</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Create → confirm → (optional) turn on Face ID. Shown after a password login when no login PIN exists yet.
+function LoginPinSetup({ onSave, onEnableFaceId, faceIdAvailable, onDone, initialStep = 'create' }) {
+  const [step, setStep] = useState(initialStep); // create | confirm | faceid
+  const [first, setFirst] = useState('');
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const weak = (p) => /^(\d)\1{5}$/.test(p) || '0123456789'.includes(p) || '9876543210'.includes(p);
+
+  const press = async (d) => {
+    if (busy || pin.length >= LOGIN_PIN_LENGTH) return;
+    setError('');
+    const next = pin + d;
+    setPin(next);
+    if (next.length < LOGIN_PIN_LENGTH) return;
+    if (step === 'create') {
+      if (weak(next)) { setError('Too easy to guess. Avoid 123456 or 111111.'); setTimeout(() => setPin(''), 350); return; }
+      setFirst(next); setTimeout(() => { setPin(''); setStep('confirm'); }, 150);
+    } else {
+      if (next !== first) { setError("PINs don't match. Try again."); setTimeout(() => { setPin(''); setFirst(''); setStep('create'); }, 600); return; }
+      setBusy(true);
+      try { await onSave(next); setStep(faceIdAvailable ? 'faceid' : 'done'); if (!faceIdAvailable) onDone?.(); }
+      catch (e) { setError(e.message || 'Could not save your PIN.'); setPin(''); }
+      finally { setBusy(false); }
+    }
+  };
+
+  if (step === 'faceid') {
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col px-6 pt-20 pb-10">
+        <div className="flex-1 flex flex-col items-center text-center">
+          <div className="w-24 h-24 rounded-3xl bg-[#8B5CF6]/15 border border-[#8B5CF6]/30 flex items-center justify-center mb-6">
+            {detectPlatform() === 'ios' ? <ScanFace className="w-12 h-12 text-[#A78BFA]" /> : <Fingerprint className="w-12 h-12 text-[#A78BFA]" />}
+          </div>
+          <h1 className="text-2xl font-bold">Unlock with {bioName()}</h1>
+          <p className="text-sm text-neutral-400 mt-2 max-w-[280px]">Open Tranxact without typing your PIN. Your PIN still works any time.</p>
+        </div>
+        {error && <p className="text-sm text-red-400 text-center mb-3">{error}</p>}
+        <PrimaryButton onClick={async () => {
+          setBusy(true); setError('');
+          try { await onEnableFaceId?.(); onDone?.(); }
+          catch (e) { if (e?.name !== 'NotAllowedError' && e?.name !== 'AbortError') setError(e?.message || 'Could not turn it on.'); }
+          finally { setBusy(false); }
+        }} disabled={busy}>
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : `Turn on ${bioName()}`}
+        </PrimaryButton>
+        <button onClick={onDone} className="w-full text-sm text-neutral-500 hover:text-white transition py-3 mt-1">Maybe later</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-black text-white flex flex-col px-6 pt-16 pb-10">
+      <div className="flex flex-col items-center text-center">
+        <div className="w-14 h-14 rounded-2xl bg-[#8B5CF6] flex items-center justify-center shadow-[0_10px_40px_-8px_rgba(139,92,246,0.7)]">
+          <Lock className="w-6 h-6 text-white" />
+        </div>
+        <h1 className="text-xl font-bold mt-5">{step === 'create' ? 'Create a login PIN' : 'Confirm your PIN'}</h1>
+        <p className="text-sm text-neutral-500 mt-1 max-w-[280px]">
+          {step === 'create' ? "You'll use these 6 digits to open Tranxact. It's different from your transaction PIN." : 'Enter the same 6 digits again.'}
+        </p>
+      </div>
+      <div className="mt-10 mb-3"><PinDots count={pin.length} error={!!error} /></div>
+      <div className="h-5 text-center text-xs text-red-400">{error}</div>
+      <div className="mt-auto">
+        <NumberPad onDigit={press} onDelete={() => { setError(''); setPin((p) => p.slice(0, -1)); }} disabled={busy} />
+      </div>
+    </div>
+  );
+}
+
 function MobileAppRoot() {
   const [screen, setScreen] = useState('splash'); // splash | intro | login | signup | forgot | forgotSent | welcome | app
   const [showAddToHomeScreen, setShowAddToHomeScreen] = useState(false);
+  const [showVerifyPrompt, setShowVerifyPrompt] = useState(false); // first entry after signup, if not verified
+  const [showVerification, setShowVerification] = useState(false);
+  // App lock. pinStatus null = not loaded yet. The app locks whenever it opens with a saved session,
+  // and when it comes back after 5+ minutes in the background. A password login never locks.
+  const [pinStatus, setPinStatus] = useState(null);
+  const [locked, setLocked] = useState(false);
+  const [canFaceId, setCanFaceId] = useState(false);
+  const hiddenAtRef = useRef(0);
   const [tab, setTab] = useState('home');
   const [homeView, setHomeView] = useState('main'); // main | fund | receive | send | history | notifications
   const [adminRefreshKey, setAdminRefreshKey] = useState(0);
   const [resetEmail, setResetEmail] = useState('');   // set when a signup hits an existing account
   const [sendAgainUsername, setSendAgainUsername] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
-  const [profileView, setProfileView] = useState('main'); // main | rates | support | username | security | settings | account
+  const [profileView, setProfileView] = useState('main'); // main | rates | support | username | security | limits | account
   const [earnView, setEarnView] = useState('main'); // main | earnings | leaderboard
+  const [earnFrom, setEarnFrom] = useState('home'); // which tab Earn's back button returns to
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [profile, setProfile] = useState(null);
   const [wallet, setWallet] = useState(null);
@@ -7365,6 +8039,8 @@ function MobileAppRoot() {
     setWallet(w);
     setTransactions((t || []).map(mapTransaction));
     getUnreadNotificationCount().then(setUnreadCount).catch(() => {});
+    // If the lock service can't be reached, don't trap anyone behind it.
+    getLoginPinStatus().then(setPinStatus).catch(() => setPinStatus({ unavailable: true }));
   };
 
   const hasSeenIntro = () => { try { return localStorage.getItem('tranxactIntroSeen') === 'true'; } catch { return false; } };
@@ -7382,7 +8058,9 @@ function MobileAppRoot() {
     // Tied to this same one-time flow, so it only ever fires once,
     // automatically — no separate dismissal flag needed. Skipped entirely
     // if they're somehow already running as an installed PWA at this point.
-    if (!isRunningStandalone()) setShowAddToHomeScreen(true);
+    // Not verified yet: ask them to verify first; the home-screen tip waits until they've dealt with that.
+    if (profile?.kyc_status !== 'verified') setShowVerifyPrompt(true);
+    else if (!isRunningStandalone()) setShowAddToHomeScreen(true);
     if (opts && opts.openSecurity) { setTab('profile'); setProfileView('security'); }
     setScreen('app');
   };
@@ -7403,6 +8081,7 @@ function MobileAppRoot() {
       const { data: { session } } = await supabase.auth.getSession();
       await minSplashTime; // keep the splash on screen for a minimum duration, even if the session check is instant
       if (session) {
+        setLocked(true); // reopening with a saved session: ask for the login PIN / Face ID
         await loadUserData(session.user.id);
         setScreen(hasSeenWelcome(session) ? 'app' : 'welcome');
       } else {
@@ -7430,9 +8109,31 @@ function MobileAppRoot() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => { faceIdSupported().then(setCanFaceId); }, []);
+
+  // Lock again after 5+ minutes in the background.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { hiddenAtRef.current = Date.now(); return; }
+      if (hiddenAtRef.current && Date.now() - hiddenAtRef.current > 5 * 60 * 1000) setLocked(true);
+      hiddenAtRef.current = 0;
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
   const handleLogout = async () => {
     await signOut();
+    setLocked(false);
+    setPinStatus(null);
     setScreen('login');
+  };
+
+  // Forgot PIN, or too many wrong tries: the PIN is cleared and they log in with their password,
+  // which then asks them to create a new one.
+  const leaveLockForPassword = async () => {
+    try { await clearLoginPin(); } catch { /* already cleared or offline */ }
+    await handleLogout();
   };
 
   // Checkout works for anyone, logged in or not — checked before any auth screen.
@@ -7453,8 +8154,39 @@ function MobileAppRoot() {
   const displayName = profile?.full_name?.split(' ')[0] || profile?.username || '';
   const balance = wallet ? Number(wallet.balance) : 0;
 
+  if (locked && !pinStatus) return <SplashScreen />;
+  if (profile && pinStatus && !pinStatus.unavailable && !pinStatus.has_pin) {
+    return (
+      <LoginPinSetup
+        faceIdAvailable={canFaceId}
+        onSave={async (pin) => {
+          const r = await setLoginPin(pin);
+          if (!r?.ok) throw new Error('Could not save your PIN. Try again.');
+        }}
+        onEnableFaceId={() => registerFaceId(detectPlatform() === 'ios' ? 'iPhone' : 'Phone')}
+        onDone={() => { setPinStatus((st) => ({ ...(st || {}), has_pin: true })); setLocked(false); }}
+      />
+    );
+  }
+  if (locked && pinStatus?.has_pin) {
+    return (
+      <AppLockScreen
+        profile={profile}
+        faceIdOn={canFaceId && !!faceIdCredentialOnThisDevice()}
+        onPin={async (pin) => {
+          const r = await verifyLoginPin(pin);
+          if (r?.ok) { setLocked(false); return { ok: true }; }
+          if (r?.locked) { setTimeout(leaveLockForPassword, 1500); return { ok: false, locked: true }; }
+          return { ok: false, attemptsLeft: r?.attempts_left };
+        }}
+        onFaceId={async () => { if (await unlockWithFaceId()) setLocked(false); }}
+        onForgot={leaveLockForPassword}
+      />
+    );
+  }
+
   return (
-    <AppShell tab={tab === 'earn' ? 'home' : tab} setTab={(t) => { setTab(t); setHomeView('main'); setProfileView('main'); setEarnView('main'); }} isAdmin={profile?.is_admin === true}>
+    <AppShell tab={tab === 'earn' ? earnFrom : tab} setTab={(t) => { setTab(t); setEarnFrom('home'); setHomeView('main'); setProfileView('main'); setEarnView('main'); }} isAdmin={profile?.is_admin === true}>
       {tab === 'home' && homeView === 'main' && (
         <HomeScreen
           balanceVisible={balanceVisible}
@@ -7549,7 +8281,7 @@ function MobileAppRoot() {
         />
       )}
 
-      {tab === 'earn' && earnView === 'main' && <BackHeader title="" onBack={() => setTab('home')} />}
+      {tab === 'earn' && earnView === 'main' && <BackHeader title="" onBack={() => { setTab(earnFrom); setEarnFrom('home'); }} />}
       {tab === 'earn' && earnView === 'main' && (
         <EarnScreen
           onEarnings={() => setEarnView('earnings')}
@@ -7574,14 +8306,16 @@ function MobileAppRoot() {
 
       {tab === 'profile' && profileView === 'main' && (
         <ProfileScreen
+          profile={profile}
+          onOpenEarn={() => { setEarnFrom('profile'); setEarnView('main'); setTab('earn'); }}
           onLogout={handleLogout}
           onOpenRates={() => setProfileView('rates')}
           onOpenSupport={() => setProfileView('support')}
           onOpenSecurity={() => setProfileView('security')}
-          onOpenSettings={() => setProfileView('settings')}
+          onOpenLimits={() => setProfileView('limits')}
           onOpenAccountDetails={() => setProfileView('account')}
           onOpenAddToHomeScreen={() => setShowAddToHomeScreen(true)}
-          userId={profile?.id}
+          onOpenVerification={() => setShowVerification(true)}
           pushEnabled={profile?.push_notifications_enabled}
           onPushChange={(v) => setProfile(p => (p ? { ...p, push_notifications_enabled: v } : p))}
         />
@@ -7599,17 +8333,31 @@ function MobileAppRoot() {
           onChanged={() => { if (profile?.id) loadUserData(profile.id); }}
         />
       )}
-      {tab === 'profile' && profileView === 'security' && <SecurityScreen hasPin={profile?.has_pin === true} onBack={() => setProfileView('main')} onPinSet={() => { if (profile?.id) loadUserData(profile.id); }} />}
-      {tab === 'profile' && profileView === 'settings' && (
-        <SettingsScreen
+      {tab === 'profile' && profileView === 'security' && <SecurityScreen canFaceId={canFaceId} hasPin={profile?.has_pin === true} onBack={() => setProfileView('main')} onPinSet={() => { if (profile?.id) loadUserData(profile.id); }} />}
+      {tab === 'profile' && (profileView === 'limits' || profileView === 'settings') && (
+        <SpendingLimitsScreen
+          key={profile?.kyc_status || 'x'}
           onBack={() => setProfileView('main')}
-          initialLimit={profile?.daily_spending_limit}
-          initialPushEnabled={profile?.push_notifications_enabled}
+          profile={profile}
+          onOpenVerification={() => setShowVerification(true)}
         />
       )}
 
       {tab === 'home' && homeView === 'getpaid' && <TranxactPayScreen onClose={() => setHomeView('main')} username={profile?.username || ''} />}
       {showAddToHomeScreen && <AddToHomeScreenModal onClose={() => setShowAddToHomeScreen(false)} />}
+      {showVerifyPrompt && (
+        <GetVerifiedPrompt
+          firstName={displayName}
+          onVerify={() => { setShowVerifyPrompt(false); setShowVerification(true); }}
+          onLater={() => { setShowVerifyPrompt(false); if (!isRunningStandalone()) setShowAddToHomeScreen(true); }}
+        />
+      )}
+      {showVerification && profile?.id && (
+        <VerificationModal
+          userId={profile.id}
+          onClose={() => { setShowVerification(false); loadUserData(profile.id); }}
+        />
+      )}
     </AppShell>
   );
 }
