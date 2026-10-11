@@ -409,6 +409,18 @@ export async function getReferralEarnings(userId) {
   return { data, error };
 }
 
+export async function getMyReferralCounts() {
+  const { data, error } = await supabase.rpc('get_my_referral_counts');
+  if (error) return { all_time: 0, this_week: 0, this_month: 0 };
+  const r = data?.[0] || {};
+  return { all_time: Number(r.all_time || 0), this_week: Number(r.this_week || 0), this_month: Number(r.this_month || 0) };
+}
+
+export async function getReferralLeaderboardV2(period) {
+  const { data, error } = await supabase.rpc('get_referral_leaderboard_v2', { p_period: period });
+  return { data: data || [], error };
+}
+
 export async function getReferralLeaderboard(period) {
   const { data, error } = await supabase.rpc('get_referral_leaderboard', { p_period: period });
   return { data, error };
@@ -1366,3 +1378,4 @@ export async function turnOffFaceId() {
   if (id) await supabase.rpc('remove_passkey', { p_id: id });
   forgetFaceIdOnThisDevice();
 }
+
