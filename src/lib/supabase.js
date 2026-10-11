@@ -505,6 +505,18 @@ export async function updatePassword(newPassword) {
   return true;
 }
 
+// Change password from Security: confirm the current one first, then log out every other device.
+export async function changePassword(currentPassword, newPassword) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) throw new Error('Not signed in');
+  const { error: checkErr } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPassword });
+  if (checkErr) throw new Error('Your current password is incorrect.');
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw new Error(error.message);
+  await supabase.auth.signOut({ scope: 'others' }).catch(() => {});
+  return true;
+}
+
 export async function setTransactionPin(pin) {
   const { error } = await supabase.rpc('set_transaction_pin', { p_pin: pin });
   if (error) throw new Error(error.message);
@@ -1289,14 +1301,24 @@ async function webauthnCall(action, payload = {}) {
 // Turn on Face ID / fingerprint for this phone.
 export async function registerFaceId(label) {
   const o = await webauthnCall('register-options');
-  const cred = await navigator.credentials.create({
-    publicKey: {
-      ...o,
-      challenge: b64uToBuf(o.challenge),
-      user: { ...o.user, id: b64uToBuf(o.user.id) },
-      excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64uToBuf(c.id) })),
-    },
-  });
+  let cred;
+  try {
+    cred = await navigator.credentials.create({
+      publicKey: {
+        ...o,
+        challenge: b64uToBuf(o.challenge),
+        user: { ...o.user, id: b64uToBuf(o.user.id) },
+        excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64uToBuf(c.id) })),
+      },
+    });
+  } catch (e) {
+    // InvalidStateError = this phone already has Face ID set up for this account (e.g. from another
+    // screen, or the app's storage was cleared). Use that one instead of making a second.
+    if (e?.name === 'InvalidStateError') {
+      if (await unlockWithFaceId({ anyOnThisAccount: true })) return true;
+    }
+    throw e;
+  }
   if (!cred) throw new Error('Face ID was cancelled.');
   const response = {
     id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
@@ -1314,11 +1336,11 @@ export async function registerFaceId(label) {
 }
 
 // Unlock with Face ID. Resolves true only when our server has checked the signature.
-export async function unlockWithFaceId() {
+export async function unlockWithFaceId({ anyOnThisAccount = false } = {}) {
   const credentialId = faceIdCredentialOnThisDevice();
-  if (!credentialId) return false;
+  if (!credentialId && !anyOnThisAccount) return false;
   let o;
-  try { o = await webauthnCall('auth-options', { credential_id: credentialId }); }
+  try { o = await webauthnCall('auth-options', credentialId && !anyOnThisAccount ? { credential_id: credentialId } : {}); }
   catch (e) { if (/no_passkey/.test(e.message)) forgetFaceIdOnThisDevice(); throw e; }
   const cred = await navigator.credentials.get({
     publicKey: { ...o, challenge: b64uToBuf(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64uToBuf(c.id) })) },
@@ -1335,6 +1357,7 @@ export async function unlockWithFaceId() {
     },
   };
   const r = await webauthnCall('auth-verify', { response });
+  if (r.ok === true) { try { localStorage.setItem(FACE_ID_KEY, cred.id); } catch { /* storage unavailable */ } }
   return r.ok === true;
 }
 
