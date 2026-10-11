@@ -3778,11 +3778,18 @@ function RatesScreen({ onBack }) {
   const [calcAsset, setCalcAsset] = useState('USDT');
   const [calcAmount, setCalcAmount] = useState('');
 
-  const FEE_PCT = 0.7; // matches the platform's real crypto funding fee
+  // The live crypto funding fee, read from the same setting the server charges.
+  const [feePct, setFeePct] = useState(CRYPTO_FUNDING_FEE_PCT);
+  const FEE_PCT = feePct;
 
   const fetchRates = async () => {
-    const { data, error: err } = await supabase.rpc('get_public_rates');
+    const [{ data, error: err }, fees] = await Promise.all([
+      supabase.rpc('get_public_rates'),
+      supabase.rpc('get_public_fees'),
+    ]);
     if (err) { setError(err.message); return; }
+    const livePct = Number(fees?.data?.[0]?.crypto_funding_fee_pct);
+    if (Number.isFinite(livePct) && livePct >= 0) setFeePct(livePct);
     setRates(data || []);
     setFetchedAt(Date.now());
     setError('');
@@ -6563,7 +6570,7 @@ function VerificationModal({ onClose, userId }) {
                 <ShieldCheck className="w-6 h-6 text-amber-400" />
               </div>
               <h2 className="text-lg font-bold mb-1">Get verified</h2>
-              <p className="text-sm text-neutral-500">Until you verify, you can send up to ₦100,000 in total. Add your NIN to lift your limits.</p>
+              <p className="text-sm text-neutral-500">Until you verify, you can spend up to ₦100,000 in total on transfers and bills. Add your NIN to lift your limits.</p>
             </div>
 
             <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 mb-5">
@@ -7356,14 +7363,12 @@ function LimitRow({ k, v, strong }) {
 function SpendingLevelsSheet({ status, sendCap, receiveCap, onClose, onVerify }) {
   const levels = [
     { key: 'unverified', name: 'Level 1', tag: 'Unverified', rows: [
-      ['Send (users + banks)', sendCap ? `${fmtLimit(sendCap)} total` : 'Limited'],
+      ['Transfers + bills', sendCap ? `${fmtLimit(sendCap)} total` : 'Limited'],
       ['Receive', receiveCap ? `${fmtLimit(receiveCap)} total` : 'Limited'],
-      ['Bills & airtime', 'From your balance'],
     ] },
     { key: 'verified', name: 'Level 2', tag: 'Verified', rows: [
-      ['Send (users + banks)', 'No set limit'],
+      ['Transfers + bills', 'No set limit'],
       ['Receive', 'No limit'],
-      ['Bills & airtime', 'From your balance'],
     ] },
   ];
   const current = status === 'verified' ? 'verified' : 'unverified';
@@ -7426,10 +7431,10 @@ function SpendingLimitsScreen({ onBack, profile, onOpenVerification }) {
 
   const transferDetails = cap != null ? (
     <>
-      <LimitRow k="Sent so far" v={fmtLimit(sent)} />
-      <LimitRow k="Left to send" v={fmtLimit(left)} strong />
+      <LimitRow k="Used so far" v={fmtLimit(sent)} />
+      <LimitRow k="Left" v={fmtLimit(left)} strong />
       <LimitBar used={sent} cap={cap} />
-      <p className="text-[11px] text-neutral-500">Shared between Tranxact users and banks until you verify.</p>
+      <p className="text-[11px] text-neutral-500">One ₦100,000 total shared by transfers to users, banks and bills until you verify.</p>
     </>
   ) : personal != null ? (
     <>
@@ -7480,8 +7485,8 @@ function SpendingLimitsScreen({ onBack, profile, onOpenVerification }) {
         </div>
       ) : (
         <div className="space-y-3">
-          <LimitCard icon={Smartphone} tint="#F59E0B" title="Airtime & data" label="Limit" value="Your balance" />
-          <LimitCard icon={Zap} tint="#FACC15" title="Electricity & TV" label="Limit" value="Your balance" />
+          <LimitCard icon={Smartphone} tint="#F59E0B" title="Airtime & data" label={cap != null ? 'Max total limit' : 'Limit'} value={cap != null ? fmtLimit(cap) : 'Your balance'}>{transferDetails}</LimitCard>
+          <LimitCard icon={Zap} tint="#FACC15" title="Electricity & TV" label={cap != null ? 'Max total limit' : 'Limit'} value={cap != null ? fmtLimit(cap) : 'Your balance'}>{transferDetails}</LimitCard>
         </div>
       )}
 
@@ -7491,7 +7496,7 @@ function SpendingLimitsScreen({ onBack, profile, onOpenVerification }) {
           <div>
             <div className="text-sm font-semibold text-[#C4B5FD]">{status === 'submitted' ? 'Verification under review' : 'Need higher limits?'}</div>
             <p className="text-xs text-neutral-400 mt-0.5">
-              {status === 'submitted' ? 'Your limits lift as soon as you’re approved.' : 'Verify your Tranxact account to remove the send and receive caps.'}
+              {status === 'submitted' ? 'Your limits lift as soon as you’re approved.' : 'Verify your Tranxact account to remove the ₦100,000 spending cap and the receiving cap.'}
             </p>
           </div>
         </div>
@@ -7533,7 +7538,7 @@ function GetVerifiedPrompt({ firstName, onVerify, onLater }) {
         </div>
         <div className="relative mt-6 bg-neutral-900 border border-neutral-800 rounded-2xl divide-y divide-neutral-800">
           {[
-            { k: 'Until you verify', v: 'Send up to ₦100,000' },
+            { k: 'Until you verify', v: 'Spend up to ₦100,000' },
             { k: 'Once verified', v: 'Higher limits, full access' },
           ].map((r) => (
             <div key={r.k} className="flex items-center justify-between px-4 py-3 text-sm">
