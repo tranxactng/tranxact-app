@@ -98,6 +98,29 @@ function normalizeTimestamp(raw) {
   return raw.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
 }
 
+// Everyday bank names ("OPay", "GTBank", "Moniepoint") instead of registered company names.
+const BANK_SHORT_NAMES = [
+  [/opay|paycom/i, 'OPay'], [/palm ?pay/i, 'PalmPay'], [/moniepoint/i, 'Moniepoint'], [/kuda/i, 'Kuda'],
+  [/guaranty trust|\bgtb/i, 'GTBank'], [/united bank for africa|\buba\b/i, 'UBA'], [/first city monument|\bfcmb\b/i, 'FCMB'],
+  [/first bank/i, 'First Bank'], [/zenith/i, 'Zenith Bank'], [/access/i, 'Access Bank'], [/stanbic/i, 'Stanbic IBTC'],
+  [/sterling/i, 'Sterling Bank'], [/union bank/i, 'Union Bank'], [/wema|alat/i, 'Wema Bank'], [/fidelity/i, 'Fidelity Bank'],
+  [/ecobank/i, 'Ecobank'], [/polaris/i, 'Polaris Bank'], [/keystone/i, 'Keystone Bank'], [/providus/i, 'Providus Bank'],
+  [/jaiz/i, 'Jaiz Bank'], [/standard chartered/i, 'Standard Chartered'], [/unity bank/i, 'Unity Bank'], [/heritage/i, 'Heritage Bank'],
+  [/globus/i, 'Globus Bank'], [/titan trust/i, 'Titan Trust Bank'], [/premium trust/i, 'PremiumTrust Bank'], [/parallex/i, 'Parallex Bank'],
+  [/lotus/i, 'Lotus Bank'], [/taj/i, 'TAJBank'], [/signature/i, 'Signature Bank'], [/suntrust/i, 'SunTrust Bank'], [/optimus/i, 'Optimus Bank'],
+  [/citibank/i, 'Citibank'], [/carbon/i, 'Carbon'], [/fairmoney/i, 'FairMoney'], [/\bvfd\b/i, 'VFD'], [/rubies/i, 'Rubies'],
+  [/paga/i, 'Paga'], [/9 ?payment|9psb/i, '9PSB'], [/smartcash/i, 'SmartCash'], [/momo/i, 'MoMo'], [/hope ?psb/i, 'HopePSB'],
+];
+function shortBankName(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return raw;
+  for (const [re, short] of BANK_SHORT_NAMES) if (re.test(raw)) return short;
+  const bracket = raw.match(/\(([^()]+)\)\s*$/);
+  if (bracket) return bracket[1].trim();
+  return raw.replace(/\s+microfinance bank( limited| ltd)?$/i, ' MFB').replace(/\s+(plc|limited|ltd|nigeria)\.?$/gi, '').replace(/\s+(plc|limited|ltd|nigeria)\.?$/gi, '').trim();
+}
+const nameCase = (s) => String(s || '').toLowerCase().replace(/(^|[\s\-'.])([a-z])/g, (_m, p, c) => p + c.toUpperCase());
+
 function mapTransaction(row) {
   const byType = {
     crypto_deposit: { title: `${row.crypto_asset || 'Crypto'} received`, icon: ArrowDownToLine },
@@ -1306,7 +1329,7 @@ function buildReceipt(tx, d) {
   } else if (type === 'fund_bank') { headline = 'You received'; sub = 'Bank transfer'; }
   else if ((type === 'withdrawal' || type === 'send_bank') && d?.bank_account_name) {
     headline = 'Sent to bank';
-    sub = `${d.bank_account_name} · ${d.bank_name} ${d.bank_account_masked?.slice(-6) || ''}`.trim();
+    sub = `${nameCase(d.bank_account_name)} · ${shortBankName(d.bank_name)} ${d.bank_account_masked?.slice(-6) || ''}`.trim();
   } else if (tx.counterparty) {
     headline = amount > 0 ? 'You received' : 'You sent';
     sub = `${amount > 0 ? 'from' : 'to'} @${tx.counterparty}`;
@@ -3019,7 +3042,8 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
 
   const selectedBank = (banks || []).find(b => b.code === bankCode);
   const accountName = resolvedName || (lookupUnavailable ? typedName.trim().replace(/\s+/g, ' ') : '');
-  const recipientLabel = mode === 'user' ? `@${username}` : `${accountName || accountNumber}${selectedBank ? ' · ' + selectedBank.name : ''}`;
+  const recipientName = mode === 'user' ? `@${username}` : (accountName ? nameCase(accountName) : accountNumber);
+  const recipientLabel = mode === 'user' ? `@${username}` : `${recipientName}${selectedBank ? ' · ' + shortBankName(selectedBank.name) : ''}`;
   const canReview = mode === 'user' ? (username && amount) : (accountNumber.length === 10 && amount && accountName.length >= 3 && !resolving);
 
   const executeSend = async () => {
@@ -3153,8 +3177,8 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
       <div>
         <BackHeader title="Confirm" onBack={() => setStep('form')} />
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 space-y-4 mb-6">
-          <div className="flex justify-between text-sm"><span className="text-neutral-500">Recipient</span><span>{recipientLabel}</span></div>
-          {mode === 'bank' && <div className="flex justify-between text-sm"><span className="text-neutral-500">Bank</span><span>{selectedBank?.name}</span></div>}
+          <div className="flex justify-between gap-4 text-sm"><span className="text-neutral-500 flex-shrink-0">Recipient</span><span className="text-right">{recipientName}</span></div>
+          {mode === 'bank' && <div className="flex justify-between gap-4 text-sm"><span className="text-neutral-500 flex-shrink-0">Bank</span><span className="text-right">{shortBankName(selectedBank?.name)} · {accountNumber}</span></div>}
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(Number(amount) || 0)}</span></div>
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Fee</span><span className="font-mono">{fmtNaira(withdrawalFee)}</span></div>
           {mode === 'bank' && (
