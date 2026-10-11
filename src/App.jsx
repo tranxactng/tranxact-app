@@ -22,7 +22,7 @@ import {
   listPaystackBanks, resolveBankAccount,
   getMyNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead,
   getKycInfo, submitNin, revealNin, adminSendCustomEmail, adminBroadcastEmail, getTransactionReceipt, getMyLimits,
-  getLoginPinStatus, setLoginPin, verifyLoginPin, clearLoginPin, faceIdSupported, faceIdCredentialOnThisDevice, registerFaceId, unlockWithFaceId, turnOffFaceId
+  getLoginPinStatus, setLoginPin, changePassword, verifyLoginPin, clearLoginPin, faceIdSupported, faceIdCredentialOnThisDevice, registerFaceId, unlockWithFaceId, turnOffFaceId
 } from './lib/supabase.js';
 
 // Supabase emails a 6-digit code for signup and password reset (Authentication ->
@@ -3946,6 +3946,17 @@ function CardsScreen({ fullName = '' }) {
   );
 }
 
+// Everyone's profile picture for now: the Tranxact cap. Lives at public/avatar.jpg.
+function ProfilePhoto({ size = 80 }) {
+  return (
+    <img
+      src="/avatar.jpg" alt="" width={size} height={size}
+      className="rounded-full object-cover border border-neutral-800 bg-neutral-900 flex-shrink-0"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
 // ---------- Profile ----------
 // ---------- Admin ----------
 // Admin switch for guest payment links (people without an account). Only admins can
@@ -5683,7 +5694,7 @@ function UsernameScreen({ onBack, currentUsername, onChanged }) {
   );
 }
 
-function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId }) {
+function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId, hasLoginPin, onLoginPinSet }) {
   // Login PIN (6 digits, opens the app) and Face ID on this phone.
   const [lpOld, setLpOld] = useState('');
   const [lpNew, setLpNew] = useState('');
@@ -5696,12 +5707,12 @@ function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId }) {
   const changeLoginPin = async (e) => {
     e.preventDefault();
     setLpMsg({ ok: '', err: '' });
-    if (lpNew === lpOld) { setLpMsg({ ok: '', err: 'Choose a different PIN.' }); return; }
+    if (hasLoginPin && lpNew === lpOld) { setLpMsg({ ok: '', err: 'Choose a different PIN.' }); return; }
     setLpBusy(true);
     try {
-      const r = await setLoginPin(lpNew, lpOld);
+      const r = await setLoginPin(lpNew, hasLoginPin ? lpOld : null);
       if (!r?.ok) setLpMsg({ ok: '', err: 'Current login PIN is incorrect.' });
-      else { setLpMsg({ ok: 'Login PIN changed.', err: '' }); setLpOld(''); setLpNew(''); }
+      else { setLpMsg({ ok: hasLoginPin ? 'Login PIN changed.' : 'Login PIN created.', err: '' }); setLpOld(''); setLpNew(''); onLoginPinSet?.(); }
     } catch (err) { setLpMsg({ ok: '', err: err.message }); }
     finally { setLpBusy(false); }
   };
@@ -5716,6 +5727,7 @@ function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId }) {
     } finally { setFaceBusy(false); }
   };
 
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState('');
@@ -5735,8 +5747,10 @@ function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId }) {
     setPwSuccess(false);
     setPwLoading(true);
     try {
-      await updatePassword(newPassword);
+      if (newPassword === currentPassword) throw new Error('Your new password must be different.');
+      await changePassword(currentPassword, newPassword);
       setPwSuccess(true);
+      setCurrentPassword('');
       setNewPassword('');
     } catch (e) {
       setPwError(e.message);
@@ -5776,13 +5790,11 @@ function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId }) {
       <BackHeader title="Security" onBack={onBack} />
       <form onSubmit={handlePasswordChange} className="space-y-4">
         <h2 className="text-sm font-semibold">Change password</h2>
-        <div>
-          <Field label="New password" type="password" minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="8+ characters, 1 uppercase, 1 number" />
-          <PasswordRules password={newPassword} />
-        </div>
+        <Field label="Current password" type="password" autoComplete="current-password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="Your current password" />
+        <Field label="New password" type="password" autoComplete="new-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="8+ characters, 1 uppercase, 1 number" />
         {pwError && <p className="text-sm text-red-400">{pwError}</p>}
-        {pwSuccess && <p className="text-sm text-emerald-400">Password updated.</p>}
-        <PrimaryButton type="submit" disabled={pwLoading || !passwordOk(newPassword)}>
+        {pwSuccess && <p className="text-sm text-emerald-400">Password changed. Any other phone signed in to your account has been logged out.</p>}
+        <PrimaryButton type="submit" disabled={pwLoading || !currentPassword || !passwordOk(newPassword)}>
           {pwLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Update password'}
         </PrimaryButton>
       </form>
@@ -5808,14 +5820,14 @@ function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId }) {
         )}
         {faceErr && <p className="text-sm text-red-400">{faceErr}</p>}
         <form onSubmit={changeLoginPin} className="space-y-4">
-          <Field label="Current login PIN" type="password" inputMode="numeric" value={lpOld} onChange={e => setLpOld(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" />
-          <Field label="New login PIN (6 digits)" type="password" inputMode="numeric" value={lpNew} onChange={e => setLpNew(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" />
+          {hasLoginPin && <Field label="Current login PIN" type="password" inputMode="numeric" value={lpOld} onChange={e => setLpOld(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" />}
+          <Field label={hasLoginPin ? 'New login PIN (6 digits)' : 'Create a login PIN (6 digits)'} type="password" inputMode="numeric" value={lpNew} onChange={e => setLpNew(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" />
           {lpMsg.err && <p className="text-sm text-red-400">{lpMsg.err}</p>}
           {lpMsg.ok && <p className="text-sm text-emerald-400">{lpMsg.ok}</p>}
-          <PrimaryButton type="submit" disabled={lpBusy || lpOld.length < 6 || lpNew.length < 6}>
-            {lpBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change login PIN'}
+          <PrimaryButton type="submit" disabled={lpBusy || (hasLoginPin && lpOld.length < 6) || lpNew.length < 6}>
+            {lpBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : (hasLoginPin ? 'Change login PIN' : 'Create login PIN')}
           </PrimaryButton>
-          <p className="text-xs text-neutral-600">Forgot it? Tap "Forgot PIN" on the lock screen to log in with your password and set a new one.</p>
+          {hasLoginPin && <p className="text-xs text-neutral-600">Forgot it? Tap "Forgot PIN" on the lock screen to log in with your password and set a new one.</p>}
         </form>
       </div>
 
@@ -7248,9 +7260,7 @@ function ProfileScreen({ profile, onOpenEarn, onLogout, onOpenRates, onOpenSuppo
       </div>
 
       <div className="flex flex-col items-center text-center mb-6">
-        <div className="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white" style={{ background: avatarColor(name) }}>
-          {nameInitials(name)}
-        </div>
+        <ProfilePhoto size={84} />
         <div className="text-lg font-semibold text-white mt-3">{profile?.full_name || '—'}</div>
         <button onClick={copyUsername} className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition mt-0.5" aria-label="Copy username">
           @{username}
@@ -7896,18 +7906,17 @@ function AppLockScreen({ profile, faceIdOn, onPin, onFaceId, onForgot, autoFaceI
   };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col px-6 pt-16 pb-10" style={{ paddingTop: 'max(4rem, env(safe-area-inset-top))' }}>
+    <div className="relative min-h-[100dvh] bg-black text-white flex flex-col px-6" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}>
       <div className="absolute inset-x-0 top-0 h-72 pointer-events-none" style={{ background: 'radial-gradient(60% 100% at 50% 0%, rgba(139,92,246,0.18), rgba(139,92,246,0))' }} />
-      <div className="relative flex flex-col items-center text-center">
-        <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold" style={{ background: avatarColor(name) }}>{nameInitials(name)}</div>
+      <div className="relative flex-1 flex flex-col items-center justify-center text-center py-6">
+        <ProfilePhoto size={76} />
         <h1 className="text-xl font-bold mt-4">Welcome back{first ? `, ${first}` : ''}</h1>
         <p className="text-sm text-neutral-500 mt-1">Enter your 6-digit login PIN</p>
+        <div className="mt-8 mb-3"><PinDots count={pin.length} error={!!error} /></div>
+        <div className="h-5 text-xs text-red-400">{error}</div>
       </div>
 
-      <div className="relative mt-10 mb-3"><PinDots count={pin.length} error={!!error} /></div>
-      <div className="relative h-5 text-center text-xs text-red-400">{error}</div>
-
-      <div className="relative mt-auto">
+      <div className="relative">
         <NumberPad
           onDigit={press}
           onDelete={() => { setError(''); setPin((p) => p.slice(0, -1)); }}
@@ -7944,7 +7953,7 @@ function LoginPinSetup({ onSave, onEnableFaceId, faceIdAvailable, onDone, initia
     } else {
       if (next !== first) { setError("PINs don't match. Try again."); setTimeout(() => { setPin(''); setFirst(''); setStep('create'); }, 600); return; }
       setBusy(true);
-      try { await onSave(next); setStep(faceIdAvailable ? 'faceid' : 'done'); if (!faceIdAvailable) onDone?.(); }
+      try { await onSave(next); const offer = faceIdAvailable && !faceIdCredentialOnThisDevice(); setStep(offer ? 'faceid' : 'done'); if (!offer) onDone?.(); }
       catch (e) { setError(e.message || 'Could not save your PIN.'); setPin(''); }
       finally { setBusy(false); }
     }
@@ -7952,8 +7961,8 @@ function LoginPinSetup({ onSave, onEnableFaceId, faceIdAvailable, onDone, initia
 
   if (step === 'faceid') {
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col px-6 pt-20 pb-10">
-        <div className="flex-1 flex flex-col items-center text-center">
+      <div className="min-h-[100dvh] bg-black text-white flex flex-col px-6" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}>
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
           <div className="w-24 h-24 rounded-3xl bg-[#8B5CF6]/15 border border-[#8B5CF6]/30 flex items-center justify-center mb-6">
             {detectPlatform() === 'ios' ? <ScanFace className="w-12 h-12 text-[#A78BFA]" /> : <Fingerprint className="w-12 h-12 text-[#A78BFA]" />}
           </div>
@@ -7975,8 +7984,8 @@ function LoginPinSetup({ onSave, onEnableFaceId, faceIdAvailable, onDone, initia
   }
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col px-6 pt-16 pb-10">
-      <div className="flex flex-col items-center text-center">
+    <div className="min-h-[100dvh] bg-black text-white flex flex-col px-6" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}>
+      <div className="flex-1 flex flex-col items-center justify-center text-center py-6">
         <div className="w-14 h-14 rounded-2xl bg-[#8B5CF6] flex items-center justify-center shadow-[0_10px_40px_-8px_rgba(139,92,246,0.7)]">
           <Lock className="w-6 h-6 text-white" />
         </div>
@@ -7984,10 +7993,10 @@ function LoginPinSetup({ onSave, onEnableFaceId, faceIdAvailable, onDone, initia
         <p className="text-sm text-neutral-500 mt-1 max-w-[280px]">
           {step === 'create' ? "You'll use these 6 digits to open Tranxact. It's different from your transaction PIN." : 'Enter the same 6 digits again.'}
         </p>
+        <div className="mt-8 mb-3"><PinDots count={pin.length} error={!!error} /></div>
+        <div className="h-5 text-xs text-red-400">{error}</div>
       </div>
-      <div className="mt-10 mb-3"><PinDots count={pin.length} error={!!error} /></div>
-      <div className="h-5 text-center text-xs text-red-400">{error}</div>
-      <div className="mt-auto">
+      <div>
         <NumberPad onDigit={press} onDelete={() => { setError(''); setPin((p) => p.slice(0, -1)); }} disabled={busy} />
       </div>
     </div>
@@ -8333,7 +8342,7 @@ function MobileAppRoot() {
           onChanged={() => { if (profile?.id) loadUserData(profile.id); }}
         />
       )}
-      {tab === 'profile' && profileView === 'security' && <SecurityScreen canFaceId={canFaceId} hasPin={profile?.has_pin === true} onBack={() => setProfileView('main')} onPinSet={() => { if (profile?.id) loadUserData(profile.id); }} />}
+      {tab === 'profile' && profileView === 'security' && <SecurityScreen canFaceId={canFaceId} hasLoginPin={pinStatus?.has_pin === true} onLoginPinSet={() => setPinStatus((st) => ({ ...(st || {}), has_pin: true }))} hasPin={profile?.has_pin === true} onBack={() => setProfileView('main')} onPinSet={() => { if (profile?.id) loadUserData(profile.id); }} />}
       {tab === 'profile' && (profileView === 'limits' || profileView === 'settings') && (
         <SpendingLimitsScreen
           key={profile?.kyc_status || 'x'}
