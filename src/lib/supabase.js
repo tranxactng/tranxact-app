@@ -5,7 +5,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-export async function signUp({ email, password, username, fullName, referralCode, businessName }) {
+export async function signUp({ email, password, username, fullName, phone, referralCode, businessName }) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -15,7 +15,7 @@ export async function signUp({ email, password, username, fullName, referralCode
       // actually complete a confirmation. This sends people back to
       // wherever signup is actually happening instead.
       emailRedirectTo: window.location.origin,
-      data: { username, full_name: fullName, referral_code: referralCode || null, business_name: businessName || null },
+      data: { username, full_name: fullName, phone: phone || null, referral_code: referralCode || null, business_name: businessName || null },
     },
   });
   return { data, error };
@@ -49,7 +49,7 @@ export async function getProfile(userId) {
   // has_pin is a generated boolean (pin_hash is not null).
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, username, full_name, business_name, created_at, daily_spending_limit, push_notifications_enabled, auto_withdraw, referred_by, is_admin, kyc_status, kyc_submitted_at, kyc_reviewed_at, kyc_review_note, nin_name, guest_account, guest_claimed_at, has_pin')
+    .select('id, username, full_name, phone, business_name, created_at, daily_spending_limit, push_notifications_enabled, auto_withdraw, referred_by, is_admin, kyc_status, kyc_submitted_at, kyc_reviewed_at, kyc_review_note, nin_name, guest_account, guest_claimed_at, has_pin')
     .eq('id', userId)
     .maybeSingle();
   return { data, error };
@@ -910,6 +910,14 @@ export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_am
 // Read-only status for the Settings screen — separate function from
 // anything that actually gates a transaction, so it can never accidentally
 // affect enforcement.
+// Send limit for this account: the lower of the KYC tier cap (unverified only) and any personal limit,
+// plus how much has gone out in the last 24 hours.
+export async function getMyLimits() {
+  const { data, error } = await supabase.rpc('get_my_limits');
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function getKycInfo(userId) {
   const { data, error } = await supabase.rpc('get_kyc_info', { p_user_id: userId });
   return { data, error };
@@ -1209,4 +1217,129 @@ export async function unsubscribeFromPush() {
     // best-effort — the row still gets cleaned up server-side eventually
     // if the endpoint starts bouncing (404/410 handling in send-push-notification)
   }
+}
+
+// Full receipt for one of the signed-in user's own transactions: amount, fee, rate, coin, network,
+// blockchain hash, payer / bank details. Returns null for anything that isn't theirs.
+export async function getTransactionReceipt(txId) {
+  const { data, error } = await supabase.rpc('get_transaction_receipt', { p_tx: txId });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// ---------- App lock: login PIN + Face ID (passkeys) ----------
+export async function getLoginPinStatus() {
+  const { data, error } = await supabase.rpc('login_pin_status');
+  if (error) throw new Error(error.message);
+  return data || { has_pin: false, passkeys: 0 };
+}
+
+export async function setLoginPin(pin, oldPin = null) {
+  const { data, error } = await supabase.rpc('set_login_pin', { p_pin: pin, p_old_pin: oldPin });
+  if (error) throw new Error(error.message);
+  return data; // { ok } or { ok:false, error:'wrong_pin' }
+}
+
+export async function verifyLoginPin(pin) {
+  const { data, error } = await supabase.rpc('verify_login_pin', { p_pin: pin });
+  if (error) throw new Error(error.message);
+  return data; // { ok, attempts_left, locked }
+}
+
+export async function clearLoginPin() {
+  await supabase.rpc('clear_login_pin');
+  forgetFaceIdOnThisDevice();
+}
+
+// The passkey made on THIS phone. Face ID is per device, so it's remembered locally.
+const FACE_ID_KEY = 'tranxactFaceIdCred';
+export function faceIdCredentialOnThisDevice() { try { return localStorage.getItem(FACE_ID_KEY); } catch { return null; } }
+export function forgetFaceIdOnThisDevice() { try { localStorage.removeItem(FACE_ID_KEY); } catch { /* storage unavailable */ } }
+
+export async function faceIdSupported() {
+  try {
+    return !!(window.PublicKeyCredential && await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+  } catch { return false; }
+}
+
+const b64uToBuf = (s) => {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4);
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+};
+const bufToB64u = (buf) => {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+async function webauthnCall(action, payload = {}) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/webauthn`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Face ID is not available right now.');
+  return data;
+}
+
+// Turn on Face ID / fingerprint for this phone.
+export async function registerFaceId(label) {
+  const o = await webauthnCall('register-options');
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      ...o,
+      challenge: b64uToBuf(o.challenge),
+      user: { ...o.user, id: b64uToBuf(o.user.id) },
+      excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64uToBuf(c.id) })),
+    },
+  });
+  if (!cred) throw new Error('Face ID was cancelled.');
+  const response = {
+    id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
+    authenticatorAttachment: cred.authenticatorAttachment || undefined,
+    clientExtensionResults: cred.getClientExtensionResults?.() || {},
+    response: {
+      clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+      attestationObject: bufToB64u(cred.response.attestationObject),
+      transports: cred.response.getTransports?.() || [],
+    },
+  };
+  const r = await webauthnCall('register-verify', { response, label });
+  try { localStorage.setItem(FACE_ID_KEY, r.credential_id); } catch { /* storage unavailable */ }
+  return true;
+}
+
+// Unlock with Face ID. Resolves true only when our server has checked the signature.
+export async function unlockWithFaceId() {
+  const credentialId = faceIdCredentialOnThisDevice();
+  if (!credentialId) return false;
+  let o;
+  try { o = await webauthnCall('auth-options', { credential_id: credentialId }); }
+  catch (e) { if (/no_passkey/.test(e.message)) forgetFaceIdOnThisDevice(); throw e; }
+  const cred = await navigator.credentials.get({
+    publicKey: { ...o, challenge: b64uToBuf(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64uToBuf(c.id) })) },
+  });
+  if (!cred) return false;
+  const response = {
+    id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
+    clientExtensionResults: cred.getClientExtensionResults?.() || {},
+    response: {
+      clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+      authenticatorData: bufToB64u(cred.response.authenticatorData),
+      signature: bufToB64u(cred.response.signature),
+      userHandle: cred.response.userHandle ? bufToB64u(cred.response.userHandle) : undefined,
+    },
+  };
+  const r = await webauthnCall('auth-verify', { response });
+  return r.ok === true;
+}
+
+export async function turnOffFaceId() {
+  const id = faceIdCredentialOnThisDevice();
+  if (id) await supabase.rpc('remove_passkey', { p_id: id });
+  forgetFaceIdOnThisDevice();
 }
