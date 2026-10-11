@@ -13,7 +13,7 @@ import {
   adminLookupUser, adminRecentSettlements, adminSettle, adminNoticeAction, setPaymentLinkActive, adminListPaymentNotices, adminGetOverviewStats,
   adminListPendingWithdrawals, adminApproveWithdrawal, adminRejectWithdrawal, adminListSalesLeads, adminUpdateLeadStatus,
   adminGetCurrentRates, adminUpdateBaseRate, adminUpdateSpread, adminRevealPrivateKey, adminSweepEvm, adminCheckTronBalance, adminSweepTron, adminSweepBtc, adminCheckSolBalance,
-  getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings,
+  getReferralEarnings, getReferralLeaderboard, withdrawReferralEarnings, getMyReferralCounts, getReferralLeaderboardV2,
   getPaymentLinkActivity, updatePaymentLink, changeUsername, updatePassword, setTransactionPin, changeTransactionPin, requestAccountDeletion, verifyTransactionPin, updateSpendingLimit, updatePushPreference,
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
@@ -183,10 +183,7 @@ function usePublicSettings() {
 }
 function ReferralRuleText() {
   const s = usePublicSettings();
-  const bonus = s.first_deposit_bonus_ngn > 0
-    ? `, and they get ₦${s.first_deposit_bonus_ngn.toLocaleString()} on their first deposit of $${s.first_deposit_bonus_min_usd.toLocaleString()} or more`
-    : '';
-  return <>earn {s.referral_pct_of_crypto_fee}% of the crypto funding fee every time someone you referred receives crypto{bonus}.</>;
+  return <>Earn {s.referral_pct_of_crypto_fee}% of the fees on every crypto deposit your friends make, paid straight into your balance.</>;
 }
 // Renders its child only while bill cashback is switched on (cashback_bills_pct > 0).
 function CashbackRule({ children }) {
@@ -7589,141 +7586,105 @@ function GetVerifiedPrompt({ firstName, onVerify, onLater }) {
 }
 
 // ---------- Referrals ----------
-function EarnScreen({ onEarnings, onLeaderboard, username, userId, onWithdrawn }) {
+// Original Tranxact artwork for the Earn page: a gift with naira coins on a soft purple pill.
+function ReferArt() {
+  return (
+    <svg viewBox="0 0 240 110" className="w-56 h-auto mx-auto" aria-hidden="true">
+      <rect x="10" y="14" width="220" height="86" rx="43" fill="#8B5CF6" fillOpacity="0.14" />
+      <circle cx="44" cy="40" r="3" fill="#C4B5FD" />
+      <circle cx="200" cy="82" r="2.5" fill="#C4B5FD" />
+      <path d="M190 30 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3z" fill="#FCD34D" />
+      <path d="M52 76 l2 5 5 2 -5 2 -2 5 -2 -5 -5 -2 5 -2z" fill="#FCD34D" />
+      <rect x="92" y="46" width="56" height="44" rx="6" fill="#8B5CF6" />
+      <rect x="86" y="34" width="68" height="16" rx="5" fill="#A78BFA" />
+      <rect x="114" y="34" width="12" height="56" fill="#EDE9FE" />
+      <path d="M120 34 c-6 -14 -24 -14 -20 -3 c2 5 12 4 20 3z" fill="none" stroke="#EDE9FE" strokeWidth="4" strokeLinejoin="round" />
+      <path d="M120 34 c6 -14 24 -14 20 -3 c-2 5 -12 4 -20 3z" fill="none" stroke="#EDE9FE" strokeWidth="4" strokeLinejoin="round" />
+      <g transform="translate(66 58)">
+        <circle r="13" fill="#10B981" /><circle r="9.5" fill="none" stroke="#D1FAE5" strokeWidth="1.5" />
+        <text y="4.5" textAnchor="middle" fontSize="12" fontWeight="700" fill="#fff">₦</text>
+      </g>
+      <g transform="translate(172 60)">
+        <circle r="11" fill="#10B981" /><circle r="8" fill="none" stroke="#D1FAE5" strokeWidth="1.5" />
+        <text y="4" textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff">₦</text>
+      </g>
+    </svg>
+  );
+}
+
+function EarnScreen({ onEarnings, onLeaderboard, username }) {
   const [copied, setCopied] = useState(false);
-  const [breakdown, setBreakdown] = useState(null); // { referral, cashback, total }
-  const [withdrawing, setWithdrawing] = useState(false);
-  const [withdrawn, setWithdrawn] = useState(false);
-  const [error, setError] = useState('');
-  useClearOnEdit(error, setError);
+  const [counts, setCounts] = useState(null);
 
-  const loadBreakdown = () => {
-    getReferralEarnings(userId).then(({ data }) => {
-      const pending = (data || []).filter(e => e.status === 'pending');
-      const referral = pending.filter(e => e.type !== 'cashback').reduce((s, e) => s + Number(e.amount), 0);
-      const cashback = pending.filter(e => e.type === 'cashback').reduce((s, e) => s + Number(e.amount), 0);
-      setBreakdown({ referral, cashback, total: referral + cashback });
-    });
-  };
+  useEffect(() => { getMyReferralCounts().then(setCounts); }, []);
 
-  useEffect(() => { loadBreakdown(); }, [userId]);
-
-  const handleWithdraw = async () => {
-    setError('');
-    setWithdrawing(true);
-    try {
-      await withdrawReferralEarnings();
-      setWithdrawn(true);
-      loadBreakdown();
-      onWithdrawn?.();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setWithdrawing(false);
+  const shareLink = async () => {
+    const link = `${window.location.origin}/?ref=${username}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Join me on Tranxact', text: `Sign up on Tranxact with my referral code @${username}:`, url: link }); }
+      catch { /* user cancelled share sheet, ignore */ }
+    } else {
+      navigator.clipboard?.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     }
   };
+  const copyCode = () => { navigator.clipboard?.writeText(username || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); };
 
   return (
-    <div>
-      <h1 className="text-xl font-bold mb-1">Earn</h1>
-      <p className="text-sm text-neutral-500 mb-5">Every way Tranxact pays you back.</p>
-
-      {/* The real, combined headline number — referrals (and cashback when it's on), one
-          balance — with withdraw right here at the first place it's shown,
-          rather than making people tap through to move their own money. */}
-      <div
-        className="rounded-2xl p-6 mb-4 text-center relative overflow-hidden"
-        style={{ background: 'linear-gradient(145deg, #1E1B3A 0%, #0F2E26 100%)', border: '1px solid #2A2A30' }}
-      >
-        <p className="text-xs text-neutral-400 mb-1.5">Total earnings</p>
-        {breakdown === null ? (
-          <div className="flex justify-center py-3"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
-        ) : (
-          <div className="font-mono text-3xl font-bold mb-4">{fmtNaira(breakdown.total)}</div>
-        )}
-        {breakdown !== null && (
-          <div className="flex items-center justify-center gap-4 text-xs mb-5">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-violet-400" />
-              <span className="text-neutral-400">Referrals <span className="text-white font-mono">{fmtNaira(breakdown.referral)}</span></span>
-            </div>
-            {breakdown.cashback > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-teal-400" />
-              <span className="text-neutral-400">Cashback <span className="text-white font-mono">{fmtNaira(breakdown.cashback)}</span></span>
-            </div>
-            )}
-          </div>
-        )}
-        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
-        {breakdown !== null && (
-          <PrimaryButton onClick={handleWithdraw} disabled={withdrawing || breakdown.total <= 0 || withdrawn}>
-            {withdrawing ? <Loader2 className="w-4 h-4 animate-spin" /> : withdrawn ? <><Check className="w-4 h-4" /> Withdrawn to wallet</> : 'Withdraw to Tranxact Wallet'}
-          </PrimaryButton>
-        )}
+    <div className="pb-6">
+      <div className="text-center pt-2 mb-6">
+        <ReferArt />
+        <h1 className="text-2xl font-bold mt-4 mb-2">Refer and Earn</h1>
+        <p className="text-sm text-neutral-400 leading-relaxed max-w-xs mx-auto"><ReferralRuleText /></p>
       </div>
 
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 mb-4 text-center">
-        <p className="text-sm text-neutral-500 mb-2">Your referral code</p>
-        <div className="font-mono text-2xl font-semibold mb-4">@{username || '—'}</div>
-        <div className="grid grid-cols-2 gap-3">
-          <GhostButton onClick={() => { navigator.clipboard?.writeText(username || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
-            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'Copied' : 'Copy code'}
-          </GhostButton>
-          <GhostButton
-            onClick={async () => {
-              const link = `${window.location.origin}/?ref=${username}`;
-              if (navigator.share) {
-                try { await navigator.share({ title: 'Join me on Tranxact', text: 'Sign up on Tranxact using my referral link:', url: link }); }
-                catch { /* user cancelled share sheet, ignore */ }
-              } else {
-                navigator.clipboard?.writeText(link);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }
-            }}
-          >
-            <Share2 className="w-4 h-4" /> Share
-          </GhostButton>
-        </div>
+      <div className="grid grid-cols-3 bg-neutral-950 border border-neutral-800 rounded-2xl py-4 mb-4">
+        {[['All-time', counts?.all_time], ['This week', counts?.this_week], ['This month', counts?.this_month]].map(([label, n], i) => (
+          <div key={label} className={`text-center ${i > 0 ? 'border-l border-neutral-800' : ''}`}>
+            <div className="text-xs text-neutral-500 mb-1">{label}</div>
+            <div className="text-xl font-semibold font-mono">{counts === null ? '–' : n}</div>
+          </div>
+        ))}
       </div>
+      <p className="text-[11px] text-neutral-600 text-center -mt-2 mb-4">People who joined with your code</p>
 
-      <div className="space-y-2">
-        <button onClick={onEarnings} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 hover:bg-neutral-900 transition">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center"><Wallet className="w-4 h-4 text-violet-400" /></div>
-            <span className="text-sm font-medium">Earnings</span>
-          </div>
-          <ChevronRight className="w-4 h-4 text-neutral-600" />
-        </button>
-        <button onClick={onLeaderboard} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 hover:bg-neutral-900 transition">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-violet-500/15 flex items-center justify-center"><Trophy className="w-4 h-4 text-violet-400" /></div>
-            <span className="text-sm font-medium">Leaderboard</span>
-          </div>
-          <ChevronRight className="w-4 h-4 text-neutral-600" />
+      <div className="rounded-2xl overflow-hidden border border-neutral-800 mb-4">
+        <div className="bg-[#8B5CF6] text-white text-sm font-medium text-center py-2.5">Copy and share your referral code</div>
+        <button onClick={copyCode} className="w-full flex items-center justify-between bg-neutral-950 px-5 py-4 hover:bg-neutral-900 transition">
+          <span className="font-mono text-lg font-semibold">@{username || '—'}</span>
+          {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5 text-neutral-400" />}
         </button>
       </div>
 
-      {/* Visible the moment Earn opens — this was hidden a tap deep before,
-          inside Earnings, which meant a first-time visitor had no idea how
-          any of this actually worked without digging for it. */}
-      <div className="mt-6 space-y-3">
-        <h2 className="text-sm font-semibold px-1">How it works</h2>
-        <div className="flex items-start gap-3 px-1">
-          <div className="w-8 h-8 rounded-full bg-violet-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Users className="w-3.5 h-3.5 text-violet-400" /></div>
-          <p className="text-xs text-neutral-500 leading-relaxed">
-            <span className="text-neutral-300 font-medium">Referrals:</span> <ReferralRuleText />
-          </p>
+      <button onClick={onEarnings} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-4 hover:bg-neutral-900 transition text-left">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center flex-shrink-0"><Wallet className="w-4 h-4 text-emerald-400" /></div>
+          <div>
+            <div className="text-sm font-medium">View referral earnings</div>
+            <div className="text-xs text-neutral-500">See what you've earned from referrals</div>
+          </div>
         </div>
-        <CashbackRule>{pct => (
-        <div className="flex items-start gap-3 px-1">
-          <div className="w-8 h-8 rounded-full bg-teal-500/15 flex items-center justify-center flex-shrink-0 mt-0.5"><Sparkles className="w-3.5 h-3.5 text-teal-400" /></div>
-          <p className="text-xs text-neutral-500 leading-relaxed">
-            <span className="text-neutral-300 font-medium">Cashback:</span> earn {pct}% back on every airtime, data, electricity, or TV bill you pay for through Tranxact.
-          </p>
+        <ChevronRight className="w-4 h-4 text-neutral-600" />
+      </button>
+
+      <button onClick={onLeaderboard} className="w-full flex items-center justify-between bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-4 mt-3 hover:bg-neutral-900 transition text-left">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-amber-500/15 flex items-center justify-center flex-shrink-0"><Trophy className="w-4 h-4 text-amber-400" /></div>
+          <div>
+            <div className="text-sm font-medium">View leaderboard</div>
+            <div className="text-xs text-neutral-500">See where you rank among top referrers</div>
+          </div>
         </div>
-        )}</CashbackRule>
+        <ChevronRight className="w-4 h-4 text-neutral-600" />
+      </button>
+
+      <CashbackRule>{pct => (
+        <p className="text-xs text-neutral-500 text-center mt-4">Plus {pct}% cashback on every airtime, data, electricity or TV bill.</p>
+      )}</CashbackRule>
+
+      <div className="mt-6">
+        <PrimaryButton onClick={shareLink}><Share2 className="w-4 h-4" /> Share referral code</PrimaryButton>
       </div>
     </div>
   );
@@ -7739,7 +7700,7 @@ function ReferralEarningsScreen({ onBack, userId }) {
 
   return (
     <div>
-      <BackHeader title="Earnings" onBack={onBack} />
+      <BackHeader title="Earnings history" onBack={onBack} />
 
       <h2 className="text-sm font-semibold mb-2">How it works</h2>
       <div className="space-y-2.5 mb-6">
@@ -7751,7 +7712,7 @@ function ReferralEarningsScreen({ onBack, userId }) {
           <span className="text-neutral-300 font-medium">Cashback:</span> earn {pct}% back on every airtime, data, electricity, or TV bill you pay for.
         </p>
         )}</CashbackRule>
-        <p className="text-xs text-neutral-600">Withdraw anytime from the Earn tab.</p>
+        <p className="text-xs text-neutral-600">Rewards go straight into your Tranxact balance.</p>
       </div>
 
       <h2 className="text-sm font-semibold mb-2">Recent activity</h2>
@@ -7772,7 +7733,7 @@ function ReferralEarningsScreen({ onBack, userId }) {
               </div>
               <div className="text-right">
                 <div className="font-mono text-sm">{fmtNaira(Number(e.amount))}</div>
-                <div className={`text-[10px] ${e.status === 'withdrawn' ? 'text-neutral-600' : 'text-emerald-400'}`}>{e.status === 'withdrawn' ? 'Withdrawn' : 'Pending'}</div>
+                <div className={`text-[10px] ${e.status === 'withdrawn' ? 'text-emerald-400' : 'text-neutral-500'}`}>{e.status === 'withdrawn' ? 'Added to balance' : 'Processing'}</div>
               </div>
             </div>
           ))}
@@ -7782,44 +7743,120 @@ function ReferralEarningsScreen({ onBack, userId }) {
   );
 }
 
-function LeaderboardScreen({ onBack, myUsername }) {
+// Faceted gem used on the leaderboard podium (original artwork).
+function PodiumGem({ tone, size = 44 }) {
+  const c = {
+    gold:   ['#FDE68A', '#FBBF24', '#D97706', '#FEF3C7'],
+    silver: ['#F5F5F5', '#D4D4D4', '#737373', '#FFFFFF'],
+    bronze: ['#FDBA74', '#F97316', '#C2410C', '#FFEDD5'],
+  }[tone];
+  return (
+    <svg viewBox="0 0 48 48" width={size} height={size} aria-hidden="true">
+      <polygon points="24,3 42,13.5 42,34.5 24,45 6,34.5 6,13.5" fill={c[1]} />
+      <polygon points="24,3 42,13.5 24,24 6,13.5" fill={c[0]} />
+      <polygon points="42,13.5 42,34.5 24,24" fill={c[2]} />
+      <polygon points="24,45 6,34.5 24,24" fill={c[2]} fillOpacity="0.7" />
+      <polygon points="24,14 32,19 32,29 24,34 16,29 16,19" fill={c[3]} fillOpacity="0.55" />
+    </svg>
+  );
+}
+
+const PODIUM_STYLE = {
+  1: { tone: 'gold',   h: 132, grad: 'linear-gradient(180deg,#FEF3C7 0%,#FCD34D 100%)', num: '#B45309' },
+  2: { tone: 'silver', h: 100, grad: 'linear-gradient(180deg,#FAFAFA 0%,#D4D4D4 100%)', num: '#737373' },
+  3: { tone: 'bronze', h: 80,  grad: 'linear-gradient(180deg,#FFEDD5 0%,#FB923C 100%)', num: '#C2410C' },
+};
+
+function PodiumSpot({ place, row }) {
+  const st = PODIUM_STYLE[place];
+  return (
+    <div className="flex-1 flex flex-col items-center justify-end min-w-0">
+      <PodiumGem tone={st.tone} size={place === 1 ? 48 : 40} />
+      <div className={`mt-2 text-sm font-semibold truncate max-w-full px-1 ${row?.is_me ? 'text-violet-300' : ''}`}>{row ? row.name : '—'}</div>
+      <div className="text-[11px] text-neutral-400 font-mono mb-2">{row ? fmtNaira(Number(row.total_earned)) : '₦0.00'}</div>
+      <div className="w-full rounded-t-2xl flex items-start justify-center pt-3" style={{ height: st.h, background: st.grad }}>
+        <span className="text-3xl font-black" style={{ color: st.num, opacity: 0.85 }}>{place}</span>
+      </div>
+    </div>
+  );
+}
+
+function LeaderboardScreen({ onBack }) {
   const [range, setRange] = useState('all');
-  const [data, setData] = useState(null);
+  const [rows, setRows] = useState(null);
 
-  const load = async (period) => {
-    setData(null);
-    const { data: rows } = await getReferralLeaderboard(period);
-    setData(rows || []);
-  };
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    getReferralLeaderboardV2(range).then(({ data }) => { if (live) setRows(data); });
+    return () => { live = false; };
+  }, [range]);
 
-  useEffect(() => { load(range); }, [range]);
+  const top = (rows || []).filter(r => Number(r.rank) <= 50);
+  const byRank = (n) => top.find(r => Number(r.rank) === n);
+  const rest = top.filter(r => Number(r.rank) > 3);
+  const me = (rows || []).find(r => r.is_me);
 
   return (
-    <div>
+    <div className="pb-24">
       <BackHeader title="Leaderboard" onBack={onBack} />
       <TabToggle
         value={range}
         onChange={setRange}
         options={[
-          { value: 'all', label: 'All Time' },
-          { value: 'month', label: 'This Month' },
+          { value: 'all', label: 'All time' },
+          { value: 'month', label: 'This month' },
+          { value: 'week', label: 'This week' },
         ]}
       />
-      {data === null ? (
-        <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
-      ) : data.length === 0 ? (
-        <p className="text-sm text-neutral-500 text-center py-6">No referral earnings yet.</p>
-      ) : (
-        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
-          {data.map((row, i) => (
-            <div key={row.username} className={`flex items-center justify-between px-4 py-3.5 ${row.username === myUsername ? 'bg-violet-500/10' : ''}`}>
-              <div className="flex items-center gap-3">
-                <span className="w-5 text-sm text-neutral-500 font-mono">{i + 1}</span>
-                <span className={`text-sm ${row.username === myUsername ? 'font-semibold text-violet-300' : ''}`}>@{row.username}</span>
+
+      <div className="relative mt-4 rounded-2xl overflow-hidden border border-neutral-800 px-4 pt-6"
+        style={{ background: 'radial-gradient(120% 80% at 50% 0%, rgba(139,92,246,0.28) 0%, rgba(10,10,15,1) 60%)' }}>
+        {[[7,8,'#A78BFA'],[18,20,'#FCD34D'],[32,6,'#F472B6'],[66,7,'#34D399'],[80,18,'#A78BFA'],[93,9,'#F472B6'],[5,30,'#34D399'],[95,32,'#FCD34D']].map(([x, y, c], i) => (
+          <span key={i} className="absolute w-1.5 h-1.5 rounded-sm rotate-45" style={{ left: `${x}%`, top: `${y}%`, background: c, opacity: 0.7 }} />
+        ))}
+        {rows === null ? (
+          <div className="flex justify-center items-center h-56"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+        ) : (
+          <div className="relative flex items-end gap-2">
+            <PodiumSpot place={2} row={byRank(2)} />
+            <PodiumSpot place={1} row={byRank(1)} />
+            <PodiumSpot place={3} row={byRank(3)} />
+          </div>
+        )}
+      </div>
+
+      {rows !== null && top.length === 0 && (
+        <p className="text-sm text-neutral-500 text-center py-6">No one on the board yet. Share your code and be first.</p>
+      )}
+
+      {rest.length > 0 && (
+        <div className="mt-4 space-y-1">
+          {rest.map(r => (
+            <div key={r.rank} className={`flex items-center gap-3 px-2 py-3 rounded-xl ${r.is_me ? 'bg-violet-500/10' : ''}`}>
+              <div className="w-10 h-10 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-sm font-semibold flex-shrink-0">{r.rank}</div>
+              <div className="flex-1 min-w-0">
+                <div className={`text-sm font-medium truncate ${r.is_me ? 'text-violet-300' : ''}`}>{r.is_me ? `${r.name} (you)` : r.name}</div>
+                <div className="text-xs text-neutral-500">{r.referrals} referral{Number(r.referrals) === 1 ? '' : 's'}</div>
               </div>
-              <span className="font-mono text-sm text-neutral-400">{fmtNaira(row.total_earned)}</span>
+              <div className="font-mono text-sm">{fmtNaira(Number(r.total_earned))}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {rows !== null && (
+        <div className="sticky mt-4 -mx-1" style={{ bottom: 'calc(84px + env(safe-area-inset-bottom))' }}>
+          <div className="flex items-center gap-3 px-3 py-3 rounded-2xl bg-neutral-900/95 backdrop-blur border border-violet-500/30">
+            <div className="w-10 h-10 rounded-full border border-violet-400/60 text-violet-300 flex items-center justify-center text-xs font-semibold flex-shrink-0">
+              {me ? (Number(me.rank) > 999 ? '999+' : me.rank) : '—'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">You</div>
+              <div className="text-xs text-neutral-500">{me ? me.referrals : 0} referral{Number(me?.referrals) === 1 ? '' : 's'}</div>
+            </div>
+            <div className="font-mono text-sm">{fmtNaira(Number(me?.total_earned || 0))}</div>
+          </div>
         </div>
       )}
     </div>
@@ -8342,8 +8379,6 @@ function MobileAppRoot() {
           onEarnings={() => setEarnView('earnings')}
           onLeaderboard={() => setEarnView('leaderboard')}
           username={profile?.username || ''}
-          userId={profile?.id}
-          onWithdrawn={() => { if (profile?.id) loadUserData(profile.id); }}
         />
       )}
       {tab === 'earn' && earnView === 'earnings' && (
@@ -8353,7 +8388,7 @@ function MobileAppRoot() {
         />
       )}
       {tab === 'earn' && earnView === 'leaderboard' && (
-        <LeaderboardScreen onBack={() => setEarnView('main')} myUsername={profile?.username || ''} />
+        <LeaderboardScreen onBack={() => setEarnView('main')} />
       )}
       {tab === 'crypto' && <CryptoScreen />}
       {tab === 'cards' && <CardsScreen fullName={profile?.full_name || ''} />}
