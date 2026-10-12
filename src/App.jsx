@@ -3166,11 +3166,12 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
     if (mode !== 'bank') return 0;
     const amt = Number(amount) || 0;
     if (amt <= 0) return 0;
-    if (amt <= 5000) return 25;
-    if (amt <= 9999) return 50;
-    if (amt <= 50000) return 100;
+    if (amt <= 10000) return 75;
+    if (amt <= 100000) return 100;
     return 150;
   })();
+  // Stamp duty on bank payouts over ₦10,000 (mirrors request-withdrawal).
+  const stampDuty = mode === 'bank' && (Number(amount) || 0) > 10000 ? 50 : 0;
 
   if (step === 'confirm') {
     return (
@@ -3181,10 +3182,11 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
           {mode === 'bank' && <div className="flex justify-between gap-4 text-sm"><span className="text-neutral-500 flex-shrink-0">Bank</span><span className="text-right">{shortBankName(selectedBank?.name)} · {accountNumber}</span></div>}
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Amount</span><span className="font-mono">{fmtNaira(Number(amount) || 0)}</span></div>
           <div className="flex justify-between text-sm"><span className="text-neutral-500">Fee</span><span className="font-mono">{fmtNaira(withdrawalFee)}</span></div>
+          {stampDuty > 0 && <div className="flex justify-between text-sm"><span className="text-neutral-500">Stamp duty</span><span className="font-mono">{fmtNaira(stampDuty)}</span></div>}
           {mode === 'bank' && (
             <div className="flex justify-between text-sm pt-3 border-t border-neutral-800">
               <span className="text-neutral-300 font-medium">Total from wallet</span>
-              <span className="font-mono font-semibold">{fmtNaira((Number(amount) || 0) + withdrawalFee)}</span>
+              <span className="font-mono font-semibold">{fmtNaira((Number(amount) || 0) + withdrawalFee + stampDuty)}</span>
             </div>
           )}
         </div>
@@ -6623,7 +6625,7 @@ function VerificationModal({ onClose, userId }) {
                 <ShieldCheck className="w-6 h-6 text-amber-400" />
               </div>
               <h2 className="text-lg font-bold mb-1">Get verified</h2>
-              <p className="text-sm text-neutral-500">Until you verify, you can spend up to ₦100,000 in total on transfers and bills. Add your NIN to lift your limits.</p>
+              <p className="text-sm text-neutral-500">Until you verify, you can spend up to ₦50,000 in total on transfers and bills. Add your NIN to lift your limits.</p>
             </div>
 
             <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 mb-5">
@@ -7487,7 +7489,7 @@ function SpendingLimitsScreen({ onBack, profile, onOpenVerification }) {
       <LimitRow k="Used so far" v={fmtLimit(sent)} />
       <LimitRow k="Left" v={fmtLimit(left)} strong />
       <LimitBar used={sent} cap={cap} />
-      <p className="text-[11px] text-neutral-500">One ₦100,000 total shared by transfers to users, banks and bills until you verify.</p>
+      <p className="text-[11px] text-neutral-500">One ₦50,000 total shared by transfers to users, banks and bills until you verify.</p>
     </>
   ) : personal != null ? (
     <>
@@ -7549,7 +7551,7 @@ function SpendingLimitsScreen({ onBack, profile, onOpenVerification }) {
           <div>
             <div className="text-sm font-semibold text-[#C4B5FD]">{status === 'submitted' ? 'Verification under review' : 'Need higher limits?'}</div>
             <p className="text-xs text-neutral-400 mt-0.5">
-              {status === 'submitted' ? 'Your limits lift as soon as you’re approved.' : 'Verify your Tranxact account to remove the ₦100,000 spending cap and the receiving cap.'}
+              {status === 'submitted' ? 'Your limits lift as soon as you’re approved.' : 'Verify your Tranxact account to remove the ₦50,000 spending cap and the receiving cap.'}
             </p>
           </div>
         </div>
@@ -7566,7 +7568,7 @@ function SpendingLimitsScreen({ onBack, profile, onOpenVerification }) {
 
       {showLevels && (
         <SpendingLevelsSheet
-          status={status} sendCap={cap || Number(limits?.send_cap || 0) || 100000} receiveCap={receiveCap}
+          status={status} sendCap={cap || Number(limits?.send_cap || 0) || 50000} receiveCap={receiveCap}
           onClose={() => setShowLevels(false)}
           onVerify={() => { setShowLevels(false); onOpenVerification(); }}
         />
@@ -7591,7 +7593,7 @@ function GetVerifiedPrompt({ firstName, onVerify, onLater }) {
         </div>
         <div className="relative mt-6 bg-neutral-900 border border-neutral-800 rounded-2xl divide-y divide-neutral-800">
           {[
-            { k: 'Until you verify', v: 'Spend up to ₦100,000' },
+            { k: 'Until you verify', v: 'Spend up to ₦50,000' },
             { k: 'Once verified', v: 'Higher limits, full access' },
           ].map((r) => (
             <div key={r.k} className="flex items-center justify-between px-4 py-3 text-sm">
