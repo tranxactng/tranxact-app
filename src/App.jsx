@@ -5560,7 +5560,7 @@ function AccountDetailsScreen({ onBack, profile, onUpdated, onOpenUsername, onDe
   ];
 
   return (
-    <div>
+    <div className="flex flex-col" style={{ minHeight: 'calc(100dvh - 9rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))' }}>
       <BackHeader title="My profile" onBack={onBack} />
       <div className="bg-neutral-950 border border-neutral-800 rounded-2xl divide-y divide-neutral-900">
         <div className="px-4 py-4">
@@ -5604,11 +5604,14 @@ function AccountDetailsScreen({ onBack, profile, onUpdated, onOpenUsername, onDe
         ))}
       </div>
 
-      <div className="mt-6 bg-neutral-950 border border-neutral-800 rounded-2xl">
+      {/* Kept at the bottom, away from the profile details, so it isn't tapped by accident. */}
+      <div className="mt-auto pt-10 bg-transparent">
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl">
         <button onClick={onDeleteAccount} className="w-full flex items-center justify-between px-4 py-4 text-left">
           <span className="text-sm font-medium text-red-400">Delete account</span>
           <ChevronRight className="w-4 h-4 text-neutral-600" />
         </button>
+        </div>
       </div>
     </div>
   );
