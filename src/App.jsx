@@ -18,6 +18,7 @@ import {
   updateFullName,
   subscribeToPush, unsubscribeFromPush,
   createPaymentLink, getMyPaymentLinks, getPublicPaymentLink, getMyTranxactPayments, notifyPaymentSent, sendWelcomeEmail,
+  getTipPage, getMyTipPage, saveTipPage, getMyTipStats,
   requestWithdrawal, notifyCopyEvent,
   listPaystackBanks, resolveBankAccount,
   getMyNotifications, getUnreadNotificationCount, markNotificationRead, markAllNotificationsRead,
@@ -3473,6 +3474,7 @@ function TranxactPayScreen({ onClose, username }) {
   const [justCreated, setJustCreated] = useState(null);
 
   const [tipLink, setTipLink] = useState(undefined); // undefined = loading, null = none yet
+  const [tipView, setTipView] = useState(null); // 'stats' | 'settings' — the tip page's own screens
   const [tipCreating, setTipCreating] = useState(false);
 
   const [payments, setPayments] = useState(null);
@@ -3670,6 +3672,13 @@ function TranxactPayScreen({ onClose, username }) {
     );
   };
 
+  if (tipView && tipLink) {
+    if (tipView === 'stats') {
+      return <TipStatsScreen onBack={() => setTipView(null)} tipLink={{ ...tipLink, creator_username: username }} onEdit={() => setTipView('settings')} />;
+    }
+    return <TipSettingsScreen onBack={() => setTipView(null)} tipLink={tipLink} />;
+  }
+
   const openLinkRow = openLinkId ? (links || []).find(l => l.id === openLinkId) : null;
   if (openLinkRow) {
     return (
@@ -3791,6 +3800,10 @@ function TranxactPayScreen({ onClose, username }) {
                     {copied === 'tip' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied === 'tip' ? 'Copied' : 'Copy'}
                   </GhostButton>
                   <GhostButton onClick={() => share(payUrl(tipLink), 'Tip me on Tranxact')}><Share2 className="w-4 h-4" /> Share</GhostButton>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <GhostButton onClick={() => setTipView('stats')}><BarChart3 className="w-4 h-4" /> Tips</GhostButton>
+                  <GhostButton onClick={() => setTipView('settings')}><Settings className="w-4 h-4" /> Edit page</GhostButton>
                 </div>
               </div>
             )}
@@ -5923,6 +5936,377 @@ function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId, hasLoginPin, onLo
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
 
+// ---------- Tip page ----------
+// The creator picks one of these for their tip page; it colours the amount buttons, goal bar and avatar ring.
+const TIP_ACCENTS = {
+  violet: { solid: '#8b5cf6', soft: '#2e1065', text: '#c4b5fd' },
+  orange: { solid: '#f97316', soft: '#431407', text: '#fdba74' },
+  green: { solid: '#10b981', soft: '#022c22', text: '#6ee7b7' },
+  blue: { solid: '#3b82f6', soft: '#172554', text: '#93c5fd' },
+  mono: { solid: '#e5e5e5', soft: '#262626', text: '#ffffff' },
+};
+const TIP_DEFAULT_AMOUNTS = [500, 1000, 2000, 5000];
+const tipAccent = (key) => TIP_ACCENTS[key] || TIP_ACCENTS.violet;
+const tipWhen = (iso) => {
+  const d = new Date(iso);
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  if (mins < 60) return mins <= 1 ? 'Just now' : `${mins}m ago`;
+  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
+  if (mins < 60 * 48) return 'Yesterday';
+  return d.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
+};
+
+function TipAvatar({ name, accent, size = 84 }) {
+  const a = tipAccent(accent);
+  return (
+    <div
+      className="rounded-full flex items-center justify-center font-bold text-white flex-shrink-0"
+      style={{ width: size, height: size, fontSize: size * 0.38, background: a.soft, boxShadow: `0 0 0 ${size > 60 ? 3 : 2}px #000, 0 0 0 ${size > 60 ? 5 : 3}px ${a.solid}` }}
+      aria-hidden="true"
+    >
+      {(String(name || '?').trim()[0] || '?').toUpperCase()}
+    </div>
+  );
+}
+
+// Supporter side, before payment: the creator's page (step 1), then name and message (step 2).
+// Payment itself is the normal checkout payment step, so money and notifications work exactly as before.
+function TipFlow({ link, page, step, setStep, initial, onContinue }) {
+  const a = tipAccent(page?.accent);
+  const amounts = Array.isArray(page?.amounts) && page.amounts.length === 4 ? page.amounts.map(Number) : TIP_DEFAULT_AMOUNTS;
+  const [picked, setPicked] = useState(initial.amount && !amounts.includes(initial.amount) ? 'other' : (initial.amount || amounts[1]));
+  const [other, setOther] = useState(initial.amount && !amounts.includes(initial.amount) ? String(initial.amount) : '');
+  const [name, setName] = useState(initial.name || '');
+  const [email, setEmail] = useState(initial.email || '');
+  const [message, setMessage] = useState(initial.message || '');
+  const [isPrivate, setIsPrivate] = useState(Boolean(initial.isPrivate));
+  const [wallTab, setWallTab] = useState('recent');
+  const [reported, setReported] = useState(false);
+
+  const otherNum = Number(String(other).replace(/\D/g, '')) || 0;
+  const amount = picked === 'other' ? (otherNum >= 100 ? otherNum : 0) : picked;
+  const displayName = page?.display_name || link.creator_username;
+  const firstName = String(displayName).split(' ')[0];
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const detailsOk = name.trim().length > 1 && emailOk;
+  const wall = Array.isArray(page?.wall) ? page.wall : [];
+  const goal = page?.goal && page.goal.target ? page.goal : null;
+  const words = wall.filter(w => w.message);
+  const tabs = [
+    ...(page?.wall_on !== false ? [['recent', 'Recent'], ['words', 'Kind words']] : []),
+    ...(goal ? [['goal', 'Goal']] : []),
+  ];
+  const activeTab = tabs.find(t => t[0] === wallTab) ? wallTab : (tabs[0] || [])[0];
+  const socials = page?.socials || {};
+  const socialLinks = [
+    socials.x && { label: 'X', href: `https://x.com/${socials.x}`, path: <path d="M4 4l16 16M20 4 4 20" /> },
+    socials.instagram && { label: 'Instagram', href: `https://instagram.com/${socials.instagram}`, path: <><rect x="4" y="4" width="16" height="16" rx="5" /><circle cx="12" cy="12" r="3.5" /></> },
+    socials.link && { label: 'Website', href: socials.link, path: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></> },
+  ].filter(Boolean);
+
+  if (step === 'details') {
+    return (
+      <div className="w-full max-w-sm">
+        <div className="flex items-center justify-between mb-6">
+          <button onClick={() => setStep('page')} aria-label="Back" className="w-11 h-11 rounded-full bg-neutral-950 border border-neutral-800 flex items-center justify-center"><ChevronLeft className="w-4 h-4" /></button>
+          <div className="flex gap-1.5" aria-hidden="true">
+            <span className="w-5 h-1 rounded-full" style={{ background: a.solid }} /><span className="w-5 h-1 rounded-full" style={{ background: a.solid }} /><span className="w-5 h-1 rounded-full bg-neutral-800" />
+          </div>
+          <div className="w-11" />
+        </div>
+        <div className="flex items-center gap-3 bg-neutral-950 border border-neutral-800 rounded-2xl p-3.5 mb-6">
+          <TipAvatar name={displayName} accent={page?.accent} size={44} />
+          <div><div className="text-xs text-neutral-500">Tipping @{link.creator_username}</div><div className="font-semibold">{fmtNaira(amount).replace('.00', '')}</div></div>
+        </div>
+        <label className="block text-sm text-neutral-400 mb-2" htmlFor="tip-name">Your name</label>
+        <input id="tip-name" value={name} onChange={e => setName(e.target.value)} placeholder={`So ${firstName} knows who to thank`} className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3.5 outline-none focus:border-violet-500 placeholder-neutral-600 mb-3" />
+        <button type="button" onClick={() => setIsPrivate(v => !v)} aria-pressed={isPrivate} className="w-full flex items-center justify-between py-2 mb-4 text-sm">
+          <span className="text-left">Keep my name private<span className="block text-xs text-neutral-500">{firstName} sees "Someone" instead of your name</span></span>
+          <span className="w-11 h-6 rounded-full p-0.5 flex transition flex-shrink-0" style={{ background: isPrivate ? a.solid : '#3a3a3d', justifyContent: isPrivate ? 'flex-end' : 'flex-start' }}><span className="w-5 h-5 rounded-full bg-white" /></span>
+        </button>
+        <label className="block text-sm text-neutral-400 mb-2" htmlFor="tip-email">Email for your receipt</label>
+        <input id="tip-email" type="email" inputMode="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className={`w-full bg-neutral-950 border rounded-2xl px-4 py-3.5 outline-none placeholder-neutral-600 mb-5 ${email && !emailOk ? 'border-red-500/50' : 'border-neutral-800 focus:border-violet-500'}`} />
+        <label className="block text-sm text-neutral-400 mb-2" htmlFor="tip-msg">Say something nice (optional)</label>
+        <textarea id="tip-msg" rows={4} maxLength={140} value={message} onChange={e => setMessage(e.target.value)} placeholder="Keep doing what you do" className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-3.5 outline-none focus:border-violet-500 placeholder-neutral-600 resize-none" />
+        <div className="text-right text-xs text-neutral-600 mt-1 mb-5">{message.length} / 140</div>
+        <button onClick={() => onContinue({ amount, name: name.trim(), email: email.trim(), message: message.trim(), isPrivate })} disabled={!detailsOk} className="w-full bg-white text-black rounded-full py-4 font-bold disabled:opacity-40">
+          Continue to payment
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-sm">
+      <div className="flex flex-col items-center text-center gap-3 mb-6">
+        <TipAvatar name={displayName} accent={page?.accent} />
+        <div>
+          <div className="text-xl font-bold tracking-tight">{displayName}</div>
+          <div className="text-sm" style={{ color: a.text }}>@{link.creator_username}</div>
+        </div>
+        {page?.bio && <p className="text-sm text-neutral-300 max-w-xs leading-relaxed">{page.bio}</p>}
+        {socialLinks.length > 0 && (
+          <div className="flex gap-2">
+            {socialLinks.map(s => (
+              <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer" aria-label={s.label} className="w-10 h-10 rounded-full bg-neutral-950 border border-neutral-800 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">{s.path}</svg>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-neutral-950 border border-neutral-800 rounded-3xl p-5 mb-6">
+        <div className="font-semibold mb-3">Send a tip</div>
+        <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+          {amounts.map(v => (
+            <button key={v} onClick={() => setPicked(v)} className="rounded-2xl py-4 font-bold text-lg border transition" style={picked === v ? { background: a.solid, borderColor: a.solid, color: page?.accent === 'mono' ? '#000' : '#fff' } : { background: '#000', borderColor: '#262626' }}>
+              {fmtNaira(v).replace('.00', '')}
+            </button>
+          ))}
+        </div>
+        {picked === 'other' ? (
+          <div className="mb-1">
+            <div className="flex items-center gap-2 rounded-2xl px-4 bg-black" style={{ border: `2px solid ${a.solid}` }}>
+              <span className="text-xl font-bold text-neutral-500">₦</span>
+              <input
+                autoFocus inputMode="numeric" aria-label="Tip amount in naira" placeholder="Enter amount"
+                value={other ? Number(other).toLocaleString('en-NG') : ''}
+                onChange={e => setOther(e.target.value.replace(/\D/g, '').slice(0, 7))}
+                className="flex-1 min-w-0 bg-transparent outline-none text-xl font-bold py-3 placeholder-neutral-700"
+              />
+            </div>
+            <div className="text-xs text-neutral-600 mt-1.5 mb-1">Minimum ₦100</div>
+          </div>
+        ) : (
+          <button onClick={() => setPicked('other')} className="w-full rounded-2xl py-3.5 font-semibold border border-neutral-800 bg-black mb-1">Other amount</button>
+        )}
+        <button onClick={() => setStep('details')} disabled={!amount} className="w-full bg-white text-black rounded-full py-4 font-bold mt-3 disabled:opacity-40">
+          {amount ? `Tip ${fmtNaira(amount).replace('.00', '')}` : 'Enter an amount'}
+        </button>
+      </div>
+
+      {tabs.length > 0 && (
+        <div className="mb-6">
+          <div className="flex gap-2 mb-3">
+            {tabs.map(([k, label]) => (
+              <button key={k} onClick={() => setWallTab(k)} className={`px-3.5 py-2 rounded-full text-xs font-semibold border ${activeTab === k ? 'bg-white text-black border-white' : 'bg-neutral-950 text-neutral-400 border-neutral-800'}`}>{label}</button>
+            ))}
+          </div>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl px-4">
+            {activeTab === 'goal' && goal && (() => {
+              const pct = Math.min(100, Math.round((Number(goal.raised) || 0) / Number(goal.target) * 100));
+              return (
+                <div className="py-4">
+                  <div className="flex justify-between items-baseline mb-2"><span className="font-semibold text-sm">{goal.title}</span><span className="text-xs text-neutral-500">{fmtNaira(goal.raised || 0).replace('.00', '')} of {fmtNaira(goal.target).replace('.00', '')}</span></div>
+                  <div className="h-2 rounded-full bg-neutral-800 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: a.solid }} /></div>
+                  <div className="text-xs text-neutral-500 mt-2">{pct}% reached</div>
+                </div>
+              );
+            })()}
+            {activeTab !== 'goal' && (() => {
+              const list = activeTab === 'words' ? words : wall;
+              if (!list.length) return <p className="text-sm text-neutral-500 py-4">{activeTab === 'words' ? 'No messages yet.' : `Be the first to tip ${firstName}.`}</p>;
+              return list.slice(0, 8).map((w, i) => (
+                <div key={i} className="flex gap-3 py-3 border-b border-neutral-900 last:border-0">
+                  <div className="w-9 h-9 rounded-full bg-neutral-900 flex items-center justify-center text-xs font-bold flex-shrink-0" style={{ color: a.text }}>{(w.name || 'S')[0].toUpperCase()}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex justify-between gap-2 text-sm"><span><b>{w.name || 'Someone'}</b> sent {fmtNaira(w.amount).replace('.00', '')}</span><span className="text-xs text-neutral-600 flex-shrink-0">{tipWhen(w.at)}</span></div>
+                    {w.message && <p className="text-sm text-neutral-300 mt-0.5 break-words">{w.message}</p>}
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-center gap-5 text-xs text-neutral-600">
+        <a href="https://app.tranxact.co" className="py-2">Get your own tip page</a>
+        {reported ? <span className="py-2">Thanks, we'll take a look</span> : (
+          <a href={`mailto:hello@tranxact.co?subject=${encodeURIComponent('Report tip page @' + link.creator_username)}`} onClick={() => setReported(true)} className="py-2 underline">Report this page</a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Creator side: what came in through the tip page.
+function TipStatsScreen({ onBack, tipLink, onEdit }) {
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState('');
+  useEffect(() => {
+    getMyTipStats().then(setStats).catch(e => setError(e.message));
+  }, []);
+  const url = payUrl(tipLink);
+  const copyLink = () => {
+    try { navigator.clipboard?.writeText(url); } catch (e) { /* ignore */ }
+    setCopied('link'); setTimeout(() => setCopied(''), 1500);
+  };
+  const shareLink = async () => {
+    try { if (navigator.share) { await navigator.share({ title: 'Tip me on Tranxact', url }); return; } } catch (e) { return; }
+    copyLink();
+  };
+  const naira = (n) => fmtNaira(Number(n) || 0).replace('.00', '');
+  return (
+    <div>
+      <BackHeader title="Tips" onBack={onBack} right={<button onClick={onEdit} className="text-xs font-semibold text-violet-400 px-2 py-2">Edit page</button>} />
+      {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
+      {stats === null && !error ? (
+        <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>
+      ) : stats && (
+        <>
+          <div className="grid grid-cols-2 gap-2.5 mb-6">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4"><div className="text-xs text-neutral-500 mb-1">This month</div><div className="text-xl font-bold font-mono">{naira(stats.month_total)}</div></div>
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4"><div className="text-xs text-neutral-500 mb-1">Supporters</div><div className="text-xl font-bold font-mono">{stats.month_supporters || 0}</div></div>
+          </div>
+
+          <div className="text-sm font-semibold mb-2.5">Top supporters this month</div>
+          {(stats.top || []).length === 0 ? (
+            <p className="text-sm text-neutral-500 mb-6">No named supporters yet this month.</p>
+          ) : (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl mb-2">
+              {stats.top.slice(0, 5).map((t, i) => (
+                <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-neutral-900 last:border-0">
+                  <span className="w-5 text-xs font-bold text-violet-400">{i + 1}</span>
+                  <span className="flex-1 text-sm font-semibold">{t.name}</span>
+                  <span className="text-sm font-mono">{naira(t.total)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {(stats.top || []).length > 0 && <p className="text-xs text-neutral-600 mb-6">Private tips count toward your total but never show a name.</p>}
+
+          <div className="text-sm font-semibold mb-2.5">Recent tips</div>
+          {(stats.recent || []).length === 0 ? (
+            <p className="text-sm text-neutral-500 mb-6">No tips yet. Share your page to get your first one.</p>
+          ) : (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl mb-6">
+              {stats.recent.slice(0, 10).map((r, i) => (
+                <div key={i} className="px-4 py-3 border-b border-neutral-900 last:border-0">
+                  <div className="flex justify-between gap-2 text-sm"><span><b>{r.name || 'Someone'}</b> tipped {naira(r.amount)}</span><span className="text-xs text-neutral-600 flex-shrink-0">{tipWhen(r.at)}</span></div>
+                  {r.message && <p className="text-sm text-neutral-400 mt-0.5 break-words">"{r.message}"</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="text-sm font-semibold mb-2.5">Share kit</div>
+      <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+        <div className="rounded-2xl p-4 flex flex-col items-center gap-2 text-center" style={{ background: '#F7F6F3', color: '#0A0A0B' }}>
+          <div className="text-xs font-bold">Tip @{tipLink.creator_username || ''}</div>
+          <BrandedQR data={url} size={96} />
+          <div className="text-[10px] break-all">{url.replace('https://', '')}</div>
+        </div>
+        <div className="rounded-2xl p-4 flex flex-col justify-between gap-3" style={{ background: '#2e1065' }}>
+          <div className="text-[11px] text-violet-200">For your story or status</div>
+          <div className="text-lg font-bold leading-tight">Enjoy what I do? Send me a tip.</div>
+          <div className="text-[10px] text-violet-200 break-all">{url.replace('https://', '')}</div>
+        </div>
+      </div>
+      <p className="text-xs text-neutral-600 mb-3">Screenshot either card to post it.</p>
+      <div className="grid grid-cols-2 gap-2">
+        <GhostButton onClick={copyLink}>{copied === 'link' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied === 'link' ? 'Copied' : 'Copy link'}</GhostButton>
+        <GhostButton onClick={shareLink}><Share2 className="w-4 h-4" /> Share</GhostButton>
+      </div>
+    </div>
+  );
+}
+
+// Creator side: set up the tip page.
+function TipSettingsScreen({ onBack, tipLink }) {
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  useClearOnEdit(error, setError);
+  useEffect(() => {
+    getMyTipPage().then(p => setForm({
+      bio: p?.bio || '', amounts: (p?.amounts && p.amounts.length === 4 ? p.amounts : TIP_DEFAULT_AMOUNTS).map(String),
+      thanks_note: p?.thanks_note || '', goal_on: Boolean(p?.goal_on), goal_title: p?.goal_title || '',
+      goal_target: p?.goal_target ? String(Math.round(p.goal_target)) : '', wall_on: p ? p.wall_on !== false : true,
+      social_x: p?.social_x || '', social_instagram: p?.social_instagram || '', social_link: p?.social_link || '',
+      accent: p?.accent || 'violet',
+    })).catch(e => setError(e.message));
+  }, []);
+  const set = (k, v) => { setSaved(false); setForm(f => ({ ...f, [k]: v })); };
+  const save = async () => {
+    setSaving(true); setError('');
+    try {
+      await saveTipPage({ ...form, amounts: form.amounts.map(v => Number(String(v).replace(/\D/g, '')) || 0), goal_target: Number(String(form.goal_target).replace(/\D/g, '')) || null });
+      setSaved(true);
+    } catch (e) { setError(e.message); } finally { setSaving(false); }
+  };
+  const field = 'w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-3 text-sm outline-none focus:border-violet-500 placeholder-neutral-600';
+  const Toggle = ({ on, onClick, label, sub }) => (
+    <button type="button" onClick={onClick} aria-pressed={on} className="w-full flex items-center justify-between gap-3 text-left">
+      <span><span className="block text-sm font-semibold">{label}</span>{sub && <span className="block text-xs text-neutral-500 mt-0.5">{sub}</span>}</span>
+      <span className={`w-11 h-6 rounded-full p-0.5 flex flex-shrink-0 transition ${on ? 'bg-violet-600 justify-end' : 'bg-neutral-700 justify-start'}`}><span className="w-5 h-5 rounded-full bg-white" /></span>
+    </button>
+  );
+  if (!form) return (
+    <div><BackHeader title="Tip page" onBack={onBack} />{error ? <p className="text-sm text-red-400">{error}</p> : <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-neutral-500" /></div>}</div>
+  );
+  return (
+    <div>
+      <BackHeader title="Tip page" onBack={onBack} />
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 flex items-center justify-between mb-6">
+        <div className="min-w-0"><div className="text-xs text-neutral-500">Your page</div><div className="text-sm font-semibold truncate">{payUrl(tipLink).replace('https://', '')}</div></div>
+        <a href={payUrl(tipLink)} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold bg-neutral-900 border border-neutral-800 rounded-full px-3.5 py-2 flex-shrink-0">Preview</a>
+      </div>
+
+      <div className="text-xs text-neutral-400 mb-2">Amount buttons (₦)</div>
+      <div className="grid grid-cols-4 gap-2 mb-5">
+        {form.amounts.map((v, i) => (
+          <input key={i} inputMode="numeric" aria-label={`Amount button ${i + 1}`} value={v ? Number(String(v).replace(/\D/g, '')).toLocaleString('en-NG') : ''}
+            onChange={e => set('amounts', form.amounts.map((x, j) => j === i ? e.target.value.replace(/\D/g, '').slice(0, 7) : x))}
+            className={`${field} text-center px-1`} />
+        ))}
+      </div>
+
+      <label className="block text-xs text-neutral-400 mb-2" htmlFor="tp-bio">Short bio</label>
+      <textarea id="tp-bio" rows={2} maxLength={120} value={form.bio} onChange={e => set('bio', e.target.value)} placeholder="What you do, in a line" className={`${field} resize-none`} />
+      <div className="text-right text-[11px] text-neutral-600 mt-1 mb-4">{form.bio.length} / 120</div>
+
+      <div className="text-xs text-neutral-400 mb-2">Social links</div>
+      <div className="space-y-2 mb-5">
+        <input value={form.social_x} onChange={e => set('social_x', e.target.value)} placeholder="X username" aria-label="X username" className={field} />
+        <input value={form.social_instagram} onChange={e => set('social_instagram', e.target.value)} placeholder="Instagram username" aria-label="Instagram username" className={field} />
+        <input value={form.social_link} onChange={e => set('social_link', e.target.value)} placeholder="Website, YouTube or TikTok link" aria-label="Website link" className={field} />
+      </div>
+
+      <div className="text-xs text-neutral-400 mb-2">Page colour</div>
+      <div className="flex gap-3 mb-5">
+        {Object.entries(TIP_ACCENTS).map(([k, c]) => (
+          <button key={k} onClick={() => set('accent', k)} aria-label={`Colour ${k}`} aria-pressed={form.accent === k} className="w-9 h-9 rounded-full border-2" style={{ background: c.solid, borderColor: form.accent === k ? '#fff' : 'transparent' }} />
+        ))}
+      </div>
+
+      <label className="block text-xs text-neutral-400 mb-2" htmlFor="tp-thanks">Thank-you note</label>
+      <textarea id="tp-thanks" rows={3} maxLength={200} value={form.thanks_note} onChange={e => set('thanks_note', e.target.value)} placeholder="Shown right after someone tips you" className={`${field} resize-none mb-5`} />
+
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-3">
+        <Toggle on={form.goal_on} onClick={() => set('goal_on', !form.goal_on)} label="Goal" sub="Show what tips are going towards" />
+        {form.goal_on && (
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <input value={form.goal_title} maxLength={40} onChange={e => set('goal_title', e.target.value)} placeholder="e.g. New camera" aria-label="Goal name" className={field} />
+            <input inputMode="numeric" value={form.goal_target ? Number(form.goal_target).toLocaleString('en-NG') : ''} onChange={e => set('goal_target', e.target.value.replace(/\D/g, '').slice(0, 9))} placeholder="Target ₦" aria-label="Goal target in naira" className={field} />
+          </div>
+        )}
+      </div>
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 mb-6">
+        <Toggle on={form.wall_on} onClick={() => set('wall_on', !form.wall_on)} label="Show supporters on my page" sub="Names and messages. Private tips stay private." />
+      </div>
+
+      {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+      <PrimaryButton onClick={save} disabled={saving}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? 'Saved' : 'Save'}</PrimaryButton>
+    </div>
+  );
+}
+
 // Turns a readable address (ada/logo-design) into the link's slug, then shows the usual checkout.
 // Anything not found as an address is tried as an old slug, so every old link keeps working.
 function CheckoutRoute({ path }) {
@@ -5973,6 +6357,10 @@ function CheckoutPage({ slug }) {
   // Bank details are shown only after the payer taps Pay now, so the 15-minute
   // window starts when they're actually about to transfer.
   const [bankRevealed, setBankRevealed] = useState(false);
+  // Tip links get their own page first (amounts, then name and message), then this same payment step.
+  const [tipPage, setTipPage] = useState(null);
+  const [tipStep, setTipStep] = useState('page'); // 'page' | 'details' | null once they're paying
+  const [tipInfo, setTipInfo] = useState({});
 
   // A number typed while on one tab means a different currency on another —
   // reset on switch so it's never misread (e.g. a naira figure silently
@@ -5985,6 +6373,7 @@ function CheckoutPage({ slug }) {
     getPublicPaymentLink(slug)
       .then(data => {
         setLink(data);
+        if (data?.is_tip) getTipPage(slug).then(setTipPage).catch(() => {});
       })
       .catch(e => { setError(e.message); setLink(null); });
     supabase.rpc('get_public_rates').then(({ data }) => setRates(data || []));
@@ -6092,6 +6481,8 @@ function CheckoutPage({ slug }) {
           customer_phone: isBusinessOrder && custPhone.trim() ? custPhone.trim() : undefined,
           delivery_address: needsAddress && custAddress.trim() ? custAddress.trim() : undefined,
           idempotency_key: idemKey,
+          message: link?.is_tip ? (tipInfo.message || undefined) : undefined,
+          is_private: link?.is_tip ? Boolean(tipInfo.isPrivate) : undefined,
         }),
         new Promise(r => setTimeout(r, 1100)), // brief, honest loading beat — not simulating a real check
       ]);
@@ -6135,7 +6526,18 @@ function CheckoutPage({ slug }) {
         </div>
       )}
 
-      {link && link.status === 'active' && !notice && (
+      {link && link.status === 'active' && !notice && link.is_tip && tipStep && (
+        <TipFlow
+          link={link} page={tipPage} step={tipStep} setStep={setTipStep} initial={tipInfo}
+          onContinue={(info) => {
+            setTipInfo(info); setCustName(info.name); setCustEmail(info.email);
+            setLink(l => ({ ...l, link_type: 'fixed', amount: info.amount }));
+            setPayTab('naira'); setBankRevealed(false); setCheckoutStep('payment'); setTipStep(null);
+          }}
+        />
+      )}
+
+      {link && link.status === 'active' && !notice && !(link.is_tip && tipStep) && (
         <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6">
           <div className="flex items-center gap-3 pb-5 mb-5 border-b border-neutral-900">
             {link.image_url ? (
@@ -6261,10 +6663,10 @@ function CheckoutPage({ slug }) {
           {checkoutStep === 'payment' && (<>
           {(
             <button
-              onClick={() => setCheckoutStep('details')}
+              onClick={() => (link.is_tip ? setTipStep('details') : setCheckoutStep('details'))}
               className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-white transition mb-4"
             >
-              <ChevronLeft className="w-3.5 h-3.5" /> Back to your details
+              <ChevronLeft className="w-3.5 h-3.5" /> {link.is_tip ? 'Back' : 'Back to your details'}
             </button>
           )}
 
@@ -6500,7 +6902,47 @@ function CheckoutPage({ slug }) {
         </div>
       )}
 
-      {notice && !link.business_name && (
+      {notice && !link.business_name && link.is_tip && (() => {
+        const tipName = tipPage?.display_name || link.creator_username;
+        const first = String(tipName).split(' ')[0];
+        const acc = tipAccent(tipPage?.accent);
+        const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
+        return (
+          <div className="w-full max-w-sm flex flex-col items-center text-center gap-5 pt-2">
+            <TipAvatar name={tipName} accent={tipPage?.accent} />
+            <div>
+              <div className="text-sm mb-1" style={{ color: acc.text }}>You tipped @{link.creator_username}</div>
+              <div className="text-4xl font-bold tracking-tight font-mono">{fmtNaira(link.amount).replace('.00', '')}</div>
+            </div>
+            {tipPage?.thanks_note && (
+              <div className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl p-5 text-left">
+                <div className="text-xs text-neutral-500 mb-1.5">A note from {first}</div>
+                <p className="leading-relaxed break-words">{tipPage.thanks_note}</p>
+              </div>
+            )}
+            <p className="text-xs text-neutral-500 max-w-xs leading-relaxed">We're confirming your payment. {first} is notified as soon as it lands{custEmail.trim() ? ", and we'll email your receipt" : ''}.</p>
+            <p className="text-xs text-neutral-600 font-mono -mt-2">Ref: {notice.reference}</p>
+            <button
+              onClick={async () => {
+                try { if (navigator.share) { await navigator.share({ title: `Tip ${first} on Tranxact`, url: pageUrl }); return; } } catch (e) { return; }
+                copy(pageUrl, 'share-page');
+              }}
+              className="w-full bg-white text-black rounded-full py-4 font-bold"
+            >
+              {copied === 'share-page' ? 'Link copied' : `Share ${first}'s page`}
+            </button>
+            <button
+              onClick={() => { setNotice(null); setTipStep('page'); setCheckoutStep('details'); setBankRevealed(false); setIdemKey(`chk_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`); window.scrollTo(0, 0); }}
+              className="w-full border border-neutral-700 rounded-full py-3.5 font-semibold"
+            >
+              Back to {first}'s page
+            </button>
+            <a href={`https://app.tranxact.co/?ref=${link.creator_username}`} className="text-sm text-violet-400 py-1">New here? Join Tranxact</a>
+          </div>
+        );
+      })()}
+
+      {notice && !link.business_name && !link.is_tip && (
         <div className="w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl p-6 text-center">
           <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-5">
             <Check className="w-6 h-6 text-emerald-400" />
