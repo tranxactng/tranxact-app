@@ -916,11 +916,11 @@ export async function sendWelcomeEmail(username) {
   return res.json();
 }
 
-export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_amount, customer_name, customer_email, customer_phone, delivery_address, idempotency_key }) {
+export async function notifyPaymentSent({ slug, method, crypto_asset, claimed_amount, customer_name, customer_email, customer_phone, delivery_address, idempotency_key, message, is_private }) {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/notify-payment-sent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug, method, crypto_asset, claimed_amount, customer_name, customer_email, customer_phone, delivery_address, idempotency_key }),
+    body: JSON.stringify({ slug, method, crypto_asset, claimed_amount, customer_name, customer_email, customer_phone, delivery_address, idempotency_key, message, is_private }),
   });
   const data = await res.json();
   if (!res.ok) {
@@ -1379,3 +1379,42 @@ export async function turnOffFaceId() {
   forgetFaceIdOnThisDevice();
 }
 
+
+
+// ---------- Tip page ----------
+// Public: everything a tip page shows (creator, bio, amounts, goal, confirmed supporters). null if not a tip link.
+export async function getTipPage(slug) {
+  const { data, error } = await supabase.rpc('get_tip_page', { p_slug: slug });
+  if (error) throw new Error(error.message);
+  return data || null;
+}
+
+// The signed-in creator's own tip page settings (null until they first save).
+export async function getMyTipPage() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { data, error } = await supabase.from('tip_pages')
+    .select('bio, amounts, thanks_note, goal_on, goal_title, goal_target, wall_on, social_x, social_instagram, social_link, accent')
+    .eq('user_id', user.id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data || null;
+}
+
+export async function saveTipPage(s) {
+  const { data, error } = await supabase.rpc('save_tip_page', {
+    p_bio: s.bio || '', p_amounts: s.amounts, p_thanks_note: s.thanks_note || '',
+    p_goal_on: Boolean(s.goal_on), p_goal_title: s.goal_title || '', p_goal_target: s.goal_target ? Number(s.goal_target) : null,
+    p_wall_on: s.wall_on !== false, p_social_x: s.social_x || '', p_social_instagram: s.social_instagram || '',
+    p_social_link: s.social_link || '', p_accent: s.accent || 'violet',
+  });
+  if (error) throw new Error(error.message);
+  if (!data?.ok) throw new Error(data?.error || 'Could not save your tip page');
+  return true;
+}
+
+// The creator's tips: this month's total and count, supporters, top supporters, recent tips.
+export async function getMyTipStats() {
+  const { data, error } = await supabase.rpc('get_my_tip_stats');
+  if (error) throw new Error(error.message);
+  return data;
+}
