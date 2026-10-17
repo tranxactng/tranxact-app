@@ -841,7 +841,7 @@ export async function getMyPaymentLinks() {
   if (!user) throw new Error('Not signed in');
   const { data, error } = await supabase
     .from('payment_links')
-    .select('id, slug, title, description, link_type, link_mode, amount, is_tip, status, paused_by_limit, business_id, created_at')
+    .select('id, slug, public_path, title, description, link_type, link_mode, amount, is_tip, status, paused_by_limit, business_id, created_at')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
