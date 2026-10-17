@@ -664,6 +664,13 @@ function AuthShell({ children, title, subtitle, brandLabel = 'Tranxact', tagline
   );
 }
 
+// Checkout lives on pay.tranxact.co. A link's readable address (public_path, e.g.
+// "ada/logo-design" or "ada" for a tip link) is used when it has one; its slug otherwise.
+const PAY_ORIGIN = 'https://pay.tranxact.co';
+function payUrl(link) {
+  return `${PAY_ORIGIN}/${(link && (link.public_path || link.slug)) || ''}`;
+}
+
 function SplashScreen() {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -3240,7 +3247,7 @@ function SendScreen({ onBack, onDone, hasPin, onSetupPin, initialUsername = '' }
 // ---------- TranxactPay ----------
 // One payment link's own page: what came in through it, and edit its details.
 function LinkDetailScreen({ link, onBack, onChanged, onToggle, toggleBusy, toggleError, copy, copied, share }) {
-  const url = `https://app.tranxact.co/pay/${link.slug}`;
+  const url = payUrl(link);
   const [activity, setActivity] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [title, setTitle] = useState(link.title || '');
@@ -3547,7 +3554,7 @@ function TranxactPayScreen({ onClose, username }) {
     setTipCreating(true);
     try {
       const res = await createPaymentLink({ title: 'Tip Me', link_type: 'flexible', is_tip: true });
-      setTipLink({ slug: res.slug, title: 'Tip Me', link_type: 'flexible', is_tip: true, status: 'active' });
+      setTipLink({ slug: res.slug, public_path: res.public_path || null, title: 'Tip Me', link_type: 'flexible', is_tip: true, status: 'active' });
     } catch {
       // leave as null, tab will show a retry state implicitly
     } finally {
@@ -3594,7 +3601,7 @@ function TranxactPayScreen({ onClose, username }) {
   }, [highlightId, links]);
 
   const LinkCard = ({ link }) => {
-    const url = `https://app.tranxact.co/pay/${link.slug}`;
+    const url = payUrl(link);
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}`;
     const showingQr = viewingQr === link.slug;
     const showingEmbed = viewingEmbed === link.slug;
@@ -3655,7 +3662,7 @@ function TranxactPayScreen({ onClose, username }) {
         </div>
 
         {showingQr && (
-          <a href={qrUrl} download={`${link.slug}-qr.png`} target="_blank" rel="noopener noreferrer" className="mt-2 flex items-center justify-center gap-1.5 bg-neutral-950 border border-neutral-800 rounded-lg py-2 text-xs text-neutral-400">
+          <a href={qrUrl} download={`${(link.public_path || link.slug).replace(/\//g, '-')}-qr.png`} target="_blank" rel="noopener noreferrer" className="mt-2 flex items-center justify-center gap-1.5 bg-neutral-950 border border-neutral-800 rounded-lg py-2 text-xs text-neutral-400">
             <ArrowDownToLine className="w-3.5 h-3.5" /> Download QR
           </a>
         )}
@@ -3777,13 +3784,13 @@ function TranxactPayScreen({ onClose, username }) {
               </div>
             ) : (
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 text-center">
-                <div className="bg-white rounded-lg p-2 mb-4 inline-block"><BrandedQR data={`https://app.tranxact.co/pay/${tipLink.slug}`} size={128} /></div>
-                <div className="text-violet-400 text-xs font-mono break-all mb-4">{`app.tranxact.co/pay/${tipLink.slug}`}</div>
+                <div className="bg-white rounded-lg p-2 mb-4 inline-block"><BrandedQR data={payUrl(tipLink)} size={128} /></div>
+                <div className="text-violet-400 text-xs font-mono break-all mb-4">{payUrl(tipLink).replace('https://', '')}</div>
                 <div className="grid grid-cols-2 gap-2">
-                  <GhostButton onClick={() => copy(`https://app.tranxact.co/pay/${tipLink.slug}`, 'tip')}>
+                  <GhostButton onClick={() => copy(payUrl(tipLink), 'tip')}>
                     {copied === 'tip' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied === 'tip' ? 'Copied' : 'Copy'}
                   </GhostButton>
-                  <GhostButton onClick={() => share(`https://app.tranxact.co/pay/${tipLink.slug}`, 'Tip me on Tranxact')}><Share2 className="w-4 h-4" /> Share</GhostButton>
+                  <GhostButton onClick={() => share(payUrl(tipLink), 'Tip me on Tranxact')}><Share2 className="w-4 h-4" /> Share</GhostButton>
                 </div>
               </div>
             )}
@@ -5915,6 +5922,21 @@ function SecurityScreen({ onBack, onPinSet, hasPin, canFaceId, hasLoginPin, onLo
 
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
 // ---------- Public checkout page (works for anyone, logged in or not) ----------
+
+// Turns a readable address (ada/logo-design) into the link's slug, then shows the usual checkout.
+// Anything not found as an address is tried as an old slug, so every old link keeps working.
+function CheckoutRoute({ path }) {
+  const [slug, setSlug] = useState(null);
+  useEffect(() => {
+    let off = false;
+    supabase.rpc('resolve_payment_path', { p_path: path })
+      .then(({ data }) => { if (!off) setSlug(data || path); })
+      .catch(() => { if (!off) setSlug(path); });
+    return () => { off = true; };
+  }, [path]);
+  if (!slug) return <SplashScreen />;
+  return <CheckoutPage slug={slug} />;
+}
 
 function CheckoutPage({ slug }) {
   const [link, setLink] = useState(undefined); // undefined = loading, null = not found
@@ -8385,10 +8407,23 @@ function MobileAppRoot() {
   };
 
   // Checkout works for anyone, logged in or not — checked before any auth screen.
-  const checkoutSlug = typeof window !== 'undefined' && window.location.pathname.startsWith('/pay/')
-    ? window.location.pathname.slice('/pay/'.length).replace(/\/$/, '')
-    : null;
-  if (checkoutSlug) return <CheckoutPage slug={checkoutSlug} />;
+  // pay.tranxact.co/<path> is checkout only. Old app.tranxact.co/pay/<slug> links move there.
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+    if (host.startsWith('pay.')) {
+      const p = path.replace(/^pay\//, '');
+      if (!p) { window.location.replace('https://tranxact.co'); return <SplashScreen />; }
+      return <CheckoutRoute path={p} />;
+    }
+    if (path.startsWith('pay/')) {
+      if (host === 'app.tranxact.co') {
+        window.location.replace(`${PAY_ORIGIN}/${path.slice(4)}${window.location.search}`);
+        return <SplashScreen />;
+      }
+      return <CheckoutRoute path={path.slice(4)} />;
+    }
+  }
 
   if (screen === 'splash') return <SplashScreen />;
 
